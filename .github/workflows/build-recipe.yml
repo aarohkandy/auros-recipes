@@ -125,11 +125,27 @@ jobs:
           # The gate's only real question is: does the ATTESTATION LEDGER record a full pass for THIS
           # EXACT DIGEST? So we fetch the ledger from origin, not from this checkout, because a
           # checkout is something a workflow can modify before reading it.
+          #
+          # HOW THE GATE IS POINTED AT THOSE BYTES, and why it is a file copy rather than a flag:
+          # tools/gate.mjs derives every path it reads from ITS OWN location and reads no environment
+          # variable and no --ledger flag — deliberately, so that where a process is started and what
+          # is in its environment cannot change which ledger decides. An earlier version of this step
+          # was written as `AUROS_LEDGER=/tmp/… node …`, which looked like it selected the fetched
+          # ledger and in fact selected nothing: the gate read the checkout's own file while the log
+          # said otherwise. So we put the origin bytes AT the path the gate derives.
           curl -sfL -o /tmp/passed-digests.tsv \
             https://raw.githubusercontent.com/aarohkandy/auros/main/attest/passed-digests.tsv \
             || { echo "::error::could not fetch the attestation ledger. No ledger, no publish — this fails closed on purpose."; exit 1; }
+          cp /tmp/passed-digests.tsv .auros-meta/attest/passed-digests.tsv
 
-          if ! AUROS_LEDGER=/tmp/passed-digests.tsv node .auros-base/../tools/gate.mjs "$DIGEST" --recipe "$RECIPE"; then
+          # `.auros-meta` is where the meta/control repo is checked out above. The path used to read
+          # `.auros-base/../tools/gate.mjs`, which normalises to `tools/gate.mjs` — a directory this
+          # repository does not have. The step died with "Cannot find module" before the gate ever
+          # ran. It failed closed, so nothing unsafe published, but the publish path was broken and
+          # the log read like an infrastructure error rather than like a refusal.
+          # tools/gate.refusals.test.mjs now resolves every gate.mjs path in every workflow and fails
+          # if one of them names a file that will not be there.
+          if ! node .auros-meta/tools/gate.mjs "$DIGEST" --recipe "$RECIPE"; then
             cat <<MSG
           ::error::REFUSING TO PUBLISH. The ledger has no full pass recorded for $DIGEST.
 

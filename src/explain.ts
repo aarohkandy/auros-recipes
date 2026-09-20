@@ -45,6 +45,24 @@ function para(text: string): string {
   return wrap(text, '');
 }
 
+/**
+ * A labelled row, wrapped like everything else in this document.
+ *
+ * These lines used to be plain template strings, so a fleet with a second keyboard script or three
+ * hardware models produced a line past a hundred characters while every paragraph around it wrapped
+ * at ninety-six. This text is a pull request body somebody reads in a browser on a phone, not a log,
+ * and a row that runs off the side is a row that is skipped.
+ *
+ * A value with no space in it -- a digest, a package reference -- is still emitted whole rather than
+ * broken, because a digest cut in half is worse than a long line.
+ */
+const LABEL_WIDTH = 19;
+export function field(label: string, value: string, width = LABEL_WIDTH): string {
+  const indent = ' '.repeat(2 + width);
+  const wrapped = wrap(value, indent);
+  return `  ${label.padEnd(width)}${wrapped.slice(indent.length)}`;
+}
+
 export function explain(options: ExplainOptions): string {
   const { recipe, plan, catalogue, config, fonts } = options;
   const desktop = desktopSettings(recipe);
@@ -58,12 +76,12 @@ export function explain(options: ExplainOptions): string {
   // ---- what these machines are -----------------------------------------------------------------
   out.push(...heading('What these machines are'));
   out.push('');
-  out.push(`  Speaks             ${recipe.language}${recipe.other_languages?.length ? `, and a user can switch to ${sentenceList(recipe.other_languages)} without a rebuild` : ''}`);
-  out.push(`  Keyboard           ${recipe.keyboard}${recipe.second_script ? `, with ${recipe.second_script} added -- press ${recipe.switch_scripts_with} to switch` : ''}`);
-  out.push(`  Clock              ${recipe.timezone}`);
-  out.push(`  Hardware           ${sentenceList(recipe.hardware.models)}`);
-  out.push(`  Help is            ${recipe.organisation.helpdesk.label}, ${recipe.organisation.helpdesk.phone}, printed on the machine's own help screen`);
-  out.push(`  Built on           ${baseReference(config, options.baseDigest)}`);
+  out.push(field('Speaks', `${recipe.language}${recipe.other_languages?.length ? `, and a user can switch to ${sentenceList(recipe.other_languages)} without a rebuild` : ''}`));
+  out.push(field('Keyboard', `${recipe.keyboard}${recipe.second_script ? `, with ${recipe.second_script} added -- press ${recipe.switch_scripts_with} to switch` : ''}`));
+  out.push(field('Clock', recipe.timezone));
+  out.push(field('Hardware', sentenceList(recipe.hardware.models)));
+  out.push(field('Help is', `${recipe.organisation.helpdesk.label}, ${recipe.organisation.helpdesk.phone}, printed on the machine's own help screen`));
+  out.push(field('Built on', baseReference(config, options.baseDigest)));
   out.push('');
   out.push(
     para(
@@ -167,12 +185,12 @@ export function explain(options: ExplainOptions): string {
   out.push(para(POLICY_PROSE[recipe.policy]));
   out.push('');
   if (recipe.policy === 'kiosk' && recipe.kiosk) {
-    out.push(`  Opens                    ${recipe.kiosk.opens}`);
-    out.push(`  May reach                ${sentenceList([...recipe.kiosk.allowed_sites].sort())}`);
-    out.push(`  Session wiped after      ${recipe.kiosk.forget_session_after_minutes} minutes`);
-    out.push(`  Printing                 ${recipe.kiosk.printing ? 'yes' : 'no'}`);
-    out.push(`  USB storage              ${recipe.kiosk.usb_storage ? 'yes' : 'no'}`);
-    if (recipe.kiosk.restart_daily_at) out.push(`  Restarts daily at        ${recipe.kiosk.restart_daily_at}`);
+    out.push(field('Opens', `${recipe.kiosk.opens}`, 25));
+    out.push(field('May reach', `${sentenceList([...recipe.kiosk.allowed_sites].sort())}`, 25));
+    out.push(field('Session wiped after', `${recipe.kiosk.forget_session_after_minutes} minutes`, 25));
+    out.push(field('Printing', `${recipe.kiosk.printing ? 'yes' : 'no'}`, 25));
+    out.push(field('USB storage', `${recipe.kiosk.usb_storage ? 'yes' : 'no'}`, 25));
+    if (recipe.kiosk.restart_daily_at) out.push(field('Restarts daily at', `${recipe.kiosk.restart_daily_at}`, 25));
     out.push('');
     out.push(
       para(
@@ -187,14 +205,14 @@ export function explain(options: ExplainOptions): string {
       ),
     );
   } else {
-    out.push(`  Install applications     ${desktop.can_install_apps ? 'yes' : 'no'}`);
-    out.push(`  Reach a command line     ${desktop.can_reach_a_terminal ? 'yes' : 'no'}`);
-    out.push(`  Taskbar and start menu   ${desktop.taskbar_and_start_menu ? 'yes' : 'no'}`);
-    out.push(`  Familiar folder names    ${desktop.familiar_folder_names ? 'yes' : 'no'}`);
-    out.push(`  Guided first boot        ${desktop.guided_first_boot ? 'yes' : 'no'}`);
+    out.push(field('Install applications', `${desktop.can_install_apps ? 'yes' : 'no'}`, 25));
+    out.push(field('Reach a command line', `${desktop.can_reach_a_terminal ? 'yes' : 'no'}`, 25));
+    out.push(field('Taskbar and start menu', `${desktop.taskbar_and_start_menu ? 'yes' : 'no'}`, 25));
+    out.push(field('Familiar folder names', `${desktop.familiar_folder_names ? 'yes' : 'no'}`, 25));
+    out.push(field('Guided first boot', `${desktop.guided_first_boot ? 'yes' : 'no'}`, 25));
   }
   out.push('');
-  out.push(`  Updates install between  ${recipe.updates?.install_between ?? '04:00-06:00 (the default)'}`);
+  out.push(field('Updates install between', `${recipe.updates?.install_between ?? '04:00-06:00 (the default)'}`, 25));
   out.push('');
   out.push(
     para(
@@ -208,10 +226,10 @@ export function explain(options: ExplainOptions): string {
   if (recipe.theme && Object.keys(recipe.theme).length > 0) {
     out.push(...heading('How it looks'));
     out.push('');
-    if (recipe.theme.preset) out.push(`  Theme              ${recipe.theme.preset}`);
-    if (recipe.theme.accent) out.push(`  Accent colour      ${recipe.theme.accent}`);
-    if (recipe.theme.text_scale) out.push(`  Text size          ${recipe.theme.text_scale}x`);
-    if (recipe.theme.cursor_size) out.push(`  Pointer            ${recipe.theme.cursor_size}`);
+    if (recipe.theme.preset) out.push(field('Theme', `${recipe.theme.preset}`, 19));
+    if (recipe.theme.accent) out.push(field('Accent colour', `${recipe.theme.accent}`, 19));
+    if (recipe.theme.text_scale) out.push(field('Text size', `${recipe.theme.text_scale}x`, 19));
+    if (recipe.theme.cursor_size) out.push(field('Pointer', `${recipe.theme.cursor_size}`, 19));
     out.push('');
     out.push(
       para(
@@ -268,9 +286,9 @@ export function explain(options: ExplainOptions): string {
   // ---- sign-off ---------------------------------------------------------------------------------
   out.push(...heading('Sign-off'));
   out.push('');
-  out.push(`  Approved by        ${recipe.approved_by.name}, ${recipe.approved_by.role}, on ${recipe.approved_by.date}`);
-  out.push(`  Enrolment record   ${recipe.approved_by.enrolment}`);
-  out.push(`  Size budget        ${recipe.size_budget_gb} GB -- a build larger than this fails and nothing is published`);
+  out.push(field('Approved by', `${recipe.approved_by.name}, ${recipe.approved_by.role}, on ${recipe.approved_by.date}`, 19));
+  out.push(field('Enrolment record', `${recipe.approved_by.enrolment}`, 19));
+  out.push(field('Size budget', `${recipe.size_budget_gb} GB -- a build larger than this fails and nothing is published`, 19));
   out.push('');
   if (recipe.approved_by.enrolment === 'pending') {
     out.push(
@@ -290,7 +308,7 @@ export function explain(options: ExplainOptions): string {
   // theirs, and if we cease operating the build files for THEIR image are handed over.
   out.push(
     para(
-      'This file is readable, and so is every rule that decides whether it is acceptable. Nothing ' +
+      'This file is public. If we disappear tomorrow, you fork this repository and rebuild this exact operating system with tools you already have. ' +
         'above is decided by a program we keep to ourselves, so you can check our working rather ' +
         'than take our word for it. The machines are yours and they keep booting whatever happens ' +
         'to us; what would stop is the nightly rebuild that keeps them patched, and if we ever cease ' +
