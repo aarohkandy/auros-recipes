@@ -1,3 +1,17 @@
+/*
+ * ── COORDINATION NOTE FOR AGENTS · 2026-09-20 ──────────────────────────────────────────────────────
+ * Several agents edit this repository concurrently. On 2026-09-20 a WHOLESALE rewrite of
+ * src/validate.ts silently reverted a real fix (the first_boot_message font-coverage check — a
+ * finding that a first-boot message in a script the image has no font for renders as empty boxes to
+ * the very first person who sees the machine). That fix now lives in src/scripts.ts.
+ *
+ *   - Edit this file SURGICALLY. Do not rewrite it wholesale. Re-read it immediately before writing.
+ *   - Do not reintroduce the 11-range SCRIPT_RANGES table in validate.ts; scripts.ts supersedes it,
+ *     for the reason given at the top of scripts.ts.
+ *   - A green test run after a wholesale rewrite does not prove nothing was lost — the reverted fix
+ *     had a test, and the rewrite removed both. Diff before you commit.
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────
+ */
 /**
  * Validation: the schema, then the rules a schema cannot carry.
  *
@@ -33,6 +47,7 @@ import { planPrune, type PrunePlan } from './prune.ts';
 import { kioskCandidates } from './compile.ts';
 import { desktopSettings, type Recipe } from './recipe.ts';
 import { nearest, pointer, refuse, sentenceList, type Refusal } from './refusal.ts';
+import { auditScripts, SCRIPT_REFUSAL_WHY, scriptRefusalText } from './scripts.ts';
 
 export interface ValidationResult {
   readonly ok: boolean;
@@ -51,6 +66,8 @@ export interface Toolchain {
   readonly catalogue: Catalogue;
   /** Keys the schema already refuses by name, with a better sentence than any family detector. */
   readonly namedRefusals: ReadonlySet<string>;
+  /** The reserved key families, read from schema/reserved-families.json. */
+  readonly families: ReadonlyArray<Family>;
 }
 
 export function loadToolchain(repoRoot: string): Toolchain {
@@ -60,6 +77,7 @@ export function loadToolchain(repoRoot: string): Toolchain {
     schema,
     catalogue: loadCatalogue(join(repoRoot, 'catalogue')),
     namedRefusals: reservedByName(schema.schema),
+    families: loadFamilies(repoRoot),
   };
 }
 
@@ -67,7 +85,7 @@ export function loadToolchain(repoRoot: string): Toolchain {
 // 1. Reserved key families
 // -------------------------------------------------------------------------------------------------
 
-interface Family {
+export interface Family {
   readonly id: string;
   readonly title: string;
   readonly why: string;
@@ -76,153 +94,41 @@ interface Family {
   readonly contains: ReadonlyArray<string>;
 }
 
-const FAMILIES: ReadonlyArray<Family> = [
-  {
-    id: 'base',
-    title: 'A recipe cannot name what it is built on',
-    why:
-      'The FROM line is written by the compiler from auros.config.json, the one file that holds the ' +
-      'namespace, and nothing in a recipe can influence it. Every fleet sits on the same foundation, ' +
-      'and that is the only reason a security fix is one rebuild instead of a spreadsheet. A digest ' +
-      'is refused for the same reason and it is the one worth sitting with: pinning an organisation ' +
-      'to one exact image freezes them off the rebuild that carries the next security fix, which ' +
-      'turns the machine we sold them into the abandoned machine we sold them a way out of. If a ' +
-      'fleet genuinely needs a different base, that is a conversation with a person and possibly a ' +
-      'customer we decline. It is never an edit to this file.',
-    exact: ['from', 'base', 'image', 'registry', 'digest', 'containerfile', 'dockerfile', 'parent', 'upstream', 'tag', 'manifest'],
-    contains: ['baseimage', 'fromimage', 'imageref', 'ociref', 'inheritfrom', 'basedigest', 'imagedigest', 'basetag', 'imagetag', 'rebase'],
-  },
-  {
-    id: 'kernel',
-    title: 'A recipe cannot choose a kernel, a driver or a boot argument',
-    why:
-      'The kernel, its modules, out-of-tree drivers and the boot command line belong to the base ' +
-      'image, where one team patches them once for everybody. A per-recipe kernel is a fork wearing ' +
-      'a smaller hat: the moment one organisation is on a different kernel, a security fix stops ' +
-      'being one rebuild and becomes a spreadsheet. If what you want is a quieter or noisier boot, ' +
-      'ask for that as a change to the base, where it becomes one audited setting for every fleet.',
-    exact: ['kernel', 'kargs', 'cmdline', 'modules', 'dkms', 'drivers', 'firmware', 'grub', 'initramfs', 'microcode'],
-    contains: ['kernelarg', 'kernelver', 'kernelpin', 'bootarg', 'kernelcmdline', 'kernelparam', 'moduleblacklist', 'initrd'],
-  },
-  {
-    id: 'pins',
-    title: 'Nothing can be held at a version',
-    why:
-      'There is no pin, no hold, no exclude and no minimum version, and the applications list has no ' +
-      'shape that could carry one: an application name contains no digits at all, and every way of ' +
-      'writing a version number needs one. That is the difference between a rule and a shape. A rule ' +
-      'can be argued with at four in the afternoon on a deadline; a shape cannot. Holding a package ' +
-      'back is how a machine ends up unpatched while still appearing maintained, which is the exact ' +
-      'failure this product exists to fix. If a new version broke your fleet, that is a report we ' +
-      'want and a fix in the base for everybody, not a line in one organisation\'s file that quietly ' +
-      'keeps them behind.',
-    exact: ['pin', 'pins', 'hold', 'holds', 'holdback', 'version', 'versions', 'exclude', 'excludes', 'freeze', 'lock', 'locks', 'constraint', 'constraints'],
-    contains: ['pinned', 'pinning', 'versionlock', 'lockversion', 'minversion', 'maxversion', 'exactversion', 'packageversion', 'holdpackage', 'nover', 'downgrade'],
-  },
-  {
-    id: 'scripts',
-    title: 'A recipe cannot run code',
-    why:
-      'There is no script, no hook, no command and no environment variable. Every effect a recipe can ' +
-      'have is a field with a name and a description, readable by somebody who does not write ' +
-      'software. A shell line is the opposite of everything this file is for: unreadable to the ' +
-      'person it is written for, unauditable in a pull request, and unbounded in what it can do ' +
-      'inside a build that holds the key we sign images with. Orders arrive here as pull requests ' +
-      'from strangers, and a format where a stranger can send us a command is a format we cannot ' +
-      'accept. If the effect you need is not a field here, that is a conversation, not a command.',
-    exact: ['run', 'script', 'scripts', 'hooks', 'hook', 'env', 'cmd', 'entrypoint', 'exec', 'shell', 'command', 'commands'],
-    contains: ['postinstall', 'preinstall', 'firstbootscript', 'onboot', 'runscript', 'shellcmd', 'systemdexec', 'execstart', 'environment', 'bashline'],
-  },
-  {
-    id: 'repos',
-    title: 'A recipe cannot add a software source',
-    why:
-      'A new package source is a new set of people who can put code on these laptops, added by ' +
-      'somebody filling in a form. The applications a recipe can name come from the catalogue inside ' +
-      'the base image and from Flathub, both of which are reviewed once for everybody. Turning off a ' +
-      'signature check is refused for the same reason and more strongly: it is the difference between ' +
-      'installing what we published and installing whatever answered.',
-    exact: ['repo', 'repos', 'repositories', 'copr', 'ppa', 'sources', 'mirror', 'mirrors', 'nogpgcheck', 'insecure', 'gpgcheck'],
-    contains: ['extrarepo', 'addrepo', 'customrepo', 'thirdparty', 'packagesource', 'yumrepo', 'dnfrepo', 'flathubremote', 'remoteadd'],
-  },
-  {
-    id: 'files',
-    title: 'A recipe cannot drop arbitrary files into the image',
-    why:
-      'A file overlay is a script with extra steps: a unit file, a polkit rule or a sudoers drop-in ' +
-      'placed by a recipe can undo every policy the image enforces, and nothing in a pull request ' +
-      'would make that visible to a reviewer reading a list of application names. The things a recipe ' +
-      'legitimately needs to place -- a logo, a first-boot sentence, a helpdesk number -- have their ' +
-      'own named fields, and the compiler writes them as data rather than as instructions.',
-    exact: ['files', 'file', 'overlay', 'overlays', 'patch', 'patches', 'config', 'configs', 'ostree', 'copy', 'add'],
-    contains: ['systemdunit', 'unitfile', 'dropin', 'rpmostree', 'etcfiles', 'writefile', 'filecontent', 'sysctl', 'polkitrule', 'sudoers'],
-  },
-  {
-    id: 'gates',
-    title: 'There is no way to ask for less testing',
-    why:
-      'An unsigned or untested image can never reach a customer, and the strongest way to write that ' +
-      'rule is a file that cannot express the request. Tests may only be added: look at the shape of ' +
-      'hardware.also_test -- there is no also_skip and no exclude. A flag that skips a check is a ' +
-      'flag somebody uses at the end of a long day, once, for a good reason, and then the check is ' +
-      'advisory forever.',
-    exact: ['skip', 'force', 'unsigned', 'signature', 'signing', 'bypass', 'override', 'overrides'],
-    contains: ['skipcheck', 'skiptest', 'notest', 'nocheck', 'publishwithout', 'allowuntested', 'allowunsigned', 'nosign', 'ignorefailure', 'alsoskip', 'disablecheck'],
-  },
-  {
-    id: 'secrets',
-    title: 'No credential of any kind belongs in this file',
-    why:
-      'This repository is public by design -- it is how a customer keeps their exact operating system ' +
-      'if we vanish -- so anything written here is published to the world, immediately and ' +
-      'irrevocably. A wireless key in a git history is a wireless key in a git history forever. This ' +
-      'is also a real gap rather than a complete answer: your laptops do need one wireless network ' +
-      'and one printer on day one, and the intended answer is a sealed enrolment bundle handed over ' +
-      'separately and referenced by approved_by.enrolment. That is designed and not built. See ' +
-      'schema/README.md section 4.',
-    exact: ['password', 'passphrase', 'secret', 'secrets', 'token', 'tokens', 'psk', 'credentials', 'credential', 'key', 'keys'],
-    contains: ['apikey', 'wifipassword', 'wifikey', 'licencekey', 'licensekey', 'privatekey', 'sshkey', 'authtoken', 'clientsecret', 'accesskey'],
-  },
-  {
-    id: 'rollback',
-    title: 'The safety net is not optional',
-    why:
-      'greenboot is the thing that checks the machine reached a login screen after an update and puts ' +
-      'the old image back if it did not. The fleet this product is built for is a nonprofit or a ' +
-      'school with one overworked IT person, no out-of-band console and nobody who can be walked ' +
-      'through a recovery. Switching off automatic updates or rollback converts a bad night into a ' +
-      'person physically visiting a hundred and eighty laptops with a USB stick. updates.install_between ' +
-      'moves the window; nothing closes it.',
-    exact: ['rollback', 'greenboot', 'deployments', 'deployment'],
-    contains: ['autoupdate', 'disableupdate', 'noupdate', 'updatesoff', 'pauseupdate', 'stopupdate', 'nogreenboot', 'norollback', 'staged', 'rollout'],
-  },
-  {
-    id: 'claims',
-    title: 'A recipe cannot make a general claim',
-    why:
-      'The website renders what is in these files, so a claim that cannot be written here cannot ' +
-      'appear there. There is no field for a compatibility percentage, a savings figure, a device ' +
-      'count or a testimonial, and that is prohibition 4.4 enforced by the format rather than by ' +
-      'somebody remembering it. What you CAN write is evidence: under windows_apps.tested, a named ' +
-      'program, the day a person ran it, and one of four results.',
-    exact: ['compatibility', 'testimonial', 'testimonials', 'savings', 'casestudy', 'references', 'logos'],
-    contains: ['customercount', 'devicecount', 'savingsfigure', 'successrate', 'compatpercent', 'casestudies', 'quotes'],
-  },
-];
+/**
+ * The families are DATA, in schema/reserved-families.json, not a literal in this file.
+ *
+ * They used to be a literal here, and that is precisely why the Worker behind the website could
+ * accept a recipe this validator refuses: `postInstall` is an unknown key to a JSON Schema and a
+ * refused key to this module, and only one of the two ran on the server. The website tells a visitor
+ * "this is the same schema auros-recipes validates with in CI" at the exact moment it refuses them,
+ * so a rule that exists on only one side of that sentence makes the sentence false.
+ *
+ * Moving them next to the schema means the Worker vendors ONE MORE FILE rather than reimplementing
+ * ONE MORE RULE. schema/README.md section 6 still applies: every rule that decides whether a recipe
+ * is acceptable is in this public repository, and now more of it is in a file rather than in code.
+ */
+export function loadFamilies(repoRoot: string): ReadonlyArray<Family> {
+  const path = join(repoRoot, 'schema', 'reserved-families.json');
+  const doc = JSON.parse(readFileSync(path, 'utf8')) as { families?: unknown };
+  if (!Array.isArray(doc.families) || doc.families.length === 0) {
+    throw new Error(`${path}: no reserved key families -- a validator that has forgotten its refusals is a validator that accepts a kernel pin`);
+  }
+  return doc.families as ReadonlyArray<Family>;
+}
 
 function normalise(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function familyFor(key: string): Family | null {
+export function familyFor(key: string, families: ReadonlyArray<Family>): Family | null {
   const n = normalise(key);
-  for (const family of FAMILIES) if (family.exact.includes(n)) return family;
-  for (const family of FAMILIES) for (const needle of family.contains) if (n.includes(needle)) return family;
+  for (const family of families) if (family.exact.includes(n)) return family;
+  for (const family of families) for (const needle of family.contains) if (n.includes(needle)) return family;
   return null;
 }
 
 /** Walk every object in the document, reporting unknown keys that belong to a reserved family. */
-function reservedKeyRefusals(doc: unknown, known: ReadonlySet<string>, alreadyNamed: ReadonlySet<string>): Refusal[] {
+function reservedKeyRefusals(doc: unknown, known: ReadonlySet<string>, alreadyNamed: ReadonlySet<string>, families: ReadonlyArray<Family>): Refusal[] {
   const out: Refusal[] = [];
   const seen = new Set<string>();
   const walk = (node: unknown, path: Array<string | number>): void => {
@@ -230,7 +136,7 @@ function reservedKeyRefusals(doc: unknown, known: ReadonlySet<string>, alreadyNa
     if (typeof node !== 'object' || node === null) return;
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
       if (!known.has(key) && !alreadyNamed.has(key)) {
-        const family = familyFor(key);
+        const family = familyFor(key, families);
         if (family) {
           const at = pointer([...path, key]);
           if (!seen.has(at)) {
@@ -280,36 +186,41 @@ function freeTextRefusals(doc: unknown): Refusal[] {
 // 3. Cross-field rules that need the catalogue
 // -------------------------------------------------------------------------------------------------
 
-const SCRIPT_RANGES: ReadonlyArray<{ script: string; re: RegExp }> = [
-  { script: 'Latin', re: /[A-Za-zÀ-ɏ]/ },
-  { script: 'Devanagari', re: /[ऀ-ॿ]/ },
-  { script: 'Bengali', re: /[ঀ-৿]/ },
-  { script: 'Tamil', re: /[஀-௿]/ },
-  { script: 'Telugu', re: /[ఀ-౿]/ },
-  { script: 'Arabic', re: /[؀-ۿ]/ },
-  { script: 'Greek', re: /[Ͱ-Ͽ]/ },
-  { script: 'Hebrew', re: /[֐-׿]/ },
-  { script: 'Cyrillic', re: /[Ѐ-ӿ]/ },
-  { script: 'Thai', re: /[฀-๿]/ },
-  { script: 'Ethiopic', re: /[ሀ-፿]/ },
-];
-
-export function scriptsUsedIn(text: string): string[] {
-  return SCRIPT_RANGES.filter((s) => s.re.test(text)).map((s) => s.script);
-}
+// The script table and the inverted coverage rule live in ./scripts.ts -- see its header for why
+// the first version of this check failed open on every script it had no name for.
+export { scriptsUsedIn, auditScripts } from './scripts.ts';
 
 function languageRefusals(recipe: Recipe, catalogue: Catalogue, out: Refusal[]): string[] {
   const fonts = new Set<string>();
   const covered = new Set<string>();
   const wanted = [recipe.language, ...(recipe.other_languages ?? [])];
 
-  for (const name of wanted) {
+  // uniqueItems constrains other_languages against ITSELF and knows nothing about `language`, so a
+  // recipe could name its primary language a second time in the switchable list. That is not a
+  // second language, it is the same one twice, and it made the refusal pointer below wrong: the
+  // index used to be computed with indexOf, which returns the FIRST match, so a duplicate printed
+  // other_languages[-1] or pointed at somebody else's entry.
+  (recipe.other_languages ?? []).forEach((name, i) => {
+    if (name !== recipe.language) return;
+    out.push(
+      refuse(
+        `other_languages[${i}]`,
+        `'${name}' is already this fleet's primary language.`,
+        'other_languages is the list a user can SWITCH TO from the settings screen. The primary ' +
+          'language is always available, so naming it here adds nothing and makes the settings ' +
+          'screen show the same entry twice. Remove it, or set `language` to the one you meant to ' +
+          'be primary.',
+      ),
+    );
+  });
+
+  for (const [index, name] of wanted.entries()) {
     const entry = catalogue.languages.get(name);
     if (!entry) {
       const near = nearest(name, catalogue.languages.keys(), 3);
       out.push(
         refuse(
-          name === recipe.language ? 'language' : `other_languages[${wanted.indexOf(name) - 1}]`,
+          index === 0 ? 'language' : `other_languages[${index - 1}]`,
           `'${name}' is not a language this image knows how to draw.${near.length ? ` Nearest: ${sentenceList(near)}.` : ''}`,
           'Choosing a language is also choosing its font packages, which is why there is no font list ' +
             'in a recipe for you to get wrong. A language we have no row for is refused rather than ' +
@@ -323,7 +234,7 @@ function languageRefusals(recipe: Recipe, catalogue: Catalogue, out: Refusal[]):
     if (entry.fonts.length === 0) {
       out.push(
         refuse(
-          'language',
+          index === 0 ? 'language' : `other_languages[${index - 1}]`,
           `'${name}' is in the catalogue but has no font package, so this image would have nothing to draw it with.`,
           'This is a gap to fill rather than a typo to correct: the language is known and the fonts ' +
             'are missing. Adding them is a change to catalogue/languages.tsv that a person reviews. ' +
@@ -338,20 +249,8 @@ function languageRefusals(recipe: Recipe, catalogue: Catalogue, out: Refusal[]):
   }
 
   if (recipe.first_boot_message) {
-    const used = scriptsUsedIn(recipe.first_boot_message);
-    const missing = used.filter((s) => !covered.has(s));
-    if (missing.length > 0) {
-      out.push(
-        refuse(
-          'first_boot_message',
-          `This sentence is written in ${sentenceList(missing)}, and none of the languages on this fleet brings the fonts for that.`,
-          'The first sentence a stranger reads is the one place a missing font is guaranteed to be ' +
-            'seen, and it is the one place nobody is watching. Either add the language to ' +
-            'other_languages, which brings its fonts, or write the message in a script this fleet ' +
-            'can already draw.',
-        ),
-      );
-    }
+    const what = scriptRefusalText(auditScripts(recipe.first_boot_message, covered), sentenceList);
+    if (what) out.push(refuse('first_boot_message', what, SCRIPT_REFUSAL_WHY));
   }
   return [...fonts].sort();
 }
@@ -589,6 +488,40 @@ function crossFileRefusals(
     }
   });
 
+  // NOTHING ELSE MAY LIVE IN A RECIPE FOLDER.
+  //
+  // This was a hole with a fatal at the end of it. compile.ts used to resolve the base digest from
+  // `base.lock` in this same directory -- the inside of a pull request from a stranger -- so two
+  // lines added beside recipe.yaml pinned a whole fleet to a digest of the author's choosing, and
+  // propagate.yml's staleness test (does the lockfile name the published digest?) then marked that
+  // fleet permanently up to date. Never rebuilt, never patched, never noticed.
+  //
+  // The digest now comes only from $AUROS_BASE_DIGEST and the lockfile lives in .locks/, which a
+  // pull request may not touch. This check is the other half: a recipe folder contains the recipe,
+  // the generated Containerfile, the removal-floor ledger, and the logo the recipe names. A file
+  // that is none of those is refused by name rather than ignored, because "the file IS the machine"
+  // stops being true the moment part of the machine is an attachment nobody reads in a diff.
+  const folderPath = dirname(recipePath);
+  const allowed = new Set(['recipe.yaml', 'Containerfile', 'removal-floor.lock']);
+  if (typeof recipe.organisation.logo === 'string') allowed.add(recipe.organisation.logo);
+  let entries: string[] = [];
+  try { entries = readdirSync(folderPath); } catch { entries = []; }
+  for (const entry of entries.sort()) {
+    if (allowed.has(entry)) continue;
+    out.push(
+      refuse(
+        '(recipe folder)',
+        `customers/${folder}/${entry} is not a file a recipe folder may contain.`,
+        'A recipe folder holds recipe.yaml, the Containerfile generated from it, ' +
+          'removal-floor.lock, and the logo the recipe names. Nothing else, because everything ' +
+          'else here is read by something: a stray base.lock used to pin this fleet to a base ' +
+          'image of the author\'s choosing and then convince the propagation job that the fleet ' +
+          'was already up to date. Delete the file, or add it to the repository somewhere a ' +
+          'reviewer will see it as a change rather than as furniture.',
+      ),
+    );
+  }
+
   // The ratchet on must_remove_at_least. Monotonicity cannot be expressed in a schema; the lock file
   // beside the recipe records the last published floor and CI compares against it.
   const lock = join(dirname(recipePath), 'removal-floor.lock');
@@ -604,11 +537,16 @@ function crossFileRefusals(
           refuse(
             'prune.must_remove_at_least',
             `This lowers the removal floor from ${published} to ${recipe.prune.must_remove_at_least}.`,
-            'The floor may rise freely and may only fall with a stated reason and a second approval. ' +
-              'An alarm you can turn down one point at a time is not an alarm, and this particular ' +
-              'alarm is what catches upstream quietly putting back something we took out. To lower ' +
-              `it, add ALLOW_LOWER_TO=${recipe.prune.must_remove_at_least} and a REASON= line to ` +
-              'removal-floor.lock in a separate commit, which CODEOWNERS makes somebody else approve.',
+            'The floor may rise freely and may only fall with a stated reason, recorded before the ' +
+              'change that lowers it. An alarm you can turn down one point at a time is not an ' +
+              'alarm, and this particular alarm is what catches upstream quietly putting back ' +
+              'something we took out. To lower it, add ' +
+              `ALLOW_LOWER_TO=${recipe.prune.must_remove_at_least} and a REASON= line to ` +
+              'removal-floor.lock, MERGE THAT ON ITS OWN, and lower the recipe in a later change. ' +
+              'This message is the working-tree half of the rule and cannot see a commit: the half ' +
+              'that can is scripts/floor-ratchet.mjs, which CI runs on every pull request and ' +
+              'which refuses a pull request that lowers the floor and grants itself permission to ' +
+              'do so in the same diff.',
           ),
         );
       }
@@ -632,7 +570,7 @@ export function validateDocument(tool: Toolchain, doc: unknown, recipePath: stri
     };
   }
 
-  refusals.push(...reservedKeyRefusals(doc, tool.schema.knownKeys, tool.namedRefusals));
+  refusals.push(...reservedKeyRefusals(doc, tool.schema.knownKeys, tool.namedRefusals, tool.families));
   refusals.push(...freeTextRefusals(doc));
   refusals.push(...schemaRefusals(tool.schema, doc));
 
