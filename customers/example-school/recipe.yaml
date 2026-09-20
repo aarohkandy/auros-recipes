@@ -1,0 +1,43 @@
+# ILLUSTRATIVE EXAMPLE — not a customer. No organisation named here exists.
+# 180 shared classroom laptops, Marathi-medium school. Read ../../schema/README.md first.
+
+schema: 1
+name: example-school
+for: >
+  The 180 shared classroom laptops at a Marathi-medium secondary school. Pupils sign in to
+  Google Workspace in the browser and do all their work there. Teachers use the same laptops.
+  Nobody installs anything by hand on these machines.
+organisation:
+  display_name: Example Vidyalaya
+  helpdesk: { label: School IT helpdesk, phone: "+91 20 2555 0143" }
+hardware:
+  machines: 180
+  models: [dell-latitude-e6440, hp-probook-650-g1, lenovo-thinkpad-t440]
+  also_test: [bios-legacy]
+language: Marathi
+other_languages: [English (India), Hindi]
+keyboard: English (US)
+second_script: Marathi (InScript)
+switch_scripts_with: Windows key + Spacebar
+timezone: Asia/Kolkata
+apps: [Calculator, Document Viewer, Files, Firefox, GCompris, Google Chrome, Image Viewer,
+       Scratch, Text Editor, VLC Media Player]
+prune:
+  keep_only_the_apps_above: true
+  also_keep: [printing]
+  also_remove: [developer tools, games, remote desktop, sample wallpapers and media, virtualisation]
+  must_remove_at_least: 240
+policy: managed
+windows_apps:
+  enabled: true
+  we_promise_nothing_else: true
+  tested:
+    - { app: Vidyalaya School ERP desktop client, date: "2026-09-11", result: works with caveats,
+        note: Prints report cards. The fingerprint attendance module cannot see the reader. }
+    - { app: Tally.ERP, date: "2026-09-11", result: fails,
+        note: Crashes during licence activation. The office PC stays on Windows for Tally. }
+theme: { preset: light, accent: "#1f5c3d", text_scale: 1.1 }
+updates: { install_between: "21:00-05:00" }
+first_boot_message: नमस्कार! काही अडचण असल्यास शिक्षकांना सांगा.
+size_budget_gb: 9
+approved_by: { enrolment: pending, name: A. Deshmukh, role: IT Coordinator, date: "2026-09-18" }

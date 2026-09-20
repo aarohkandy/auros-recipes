@@ -1,0 +1,95 @@
+# GATE 2 PROPAGATION — how a base change reaches every customer image with no human action.
+#
+# Spec §3: "CVE response is one rebuild. Base rebuilds -> all children rebuild -> all machines update on
+# next boot." This workflow is the middle arrow.
+#
+# There are two paths here, and the honest situation is that the good one needs a credential we do not
+# have yet:
+#
+#   1. repository_dispatch (instant).  auros-base fires this the moment it publishes. It requires a PAT
+#      or GitHub App token, because a workflow's default GITHUB_TOKEN is issued FOR ITS OWN REPOSITORY
+#      and cannot authenticate POST /repos/{other}/{repo}/dispatches (DECISIONS.md D18). Note the reason
+#      is NOT the commonly-cited recursion rule — the docs explicitly exempt repository_dispatch.
+#
+#   2. schedule (polling fallback).  Works with no secret at all. Every run re-resolves the published
+#      base digest and compares it to each recipe's lockfile; anything stale rebuilds.
+#
+# Path 2 exists so that propagation is never blocked on a credential. See BLOCKED.md B2 and B7.
+name: propagate
+on:
+  repository_dispatch:
+    types: [base-published]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+  push:
+    paths: ['customers/**', 'schema/**', 'src/**']
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      stale: ${{ steps.scan.outputs.stale }}
+      base_digest: ${{ steps.scan.outputs.base_digest }}
+      reason: ${{ steps.scan.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve the published base digest
+        id: scan
+        run: |
+          BASE_REF="ghcr.io/aarohkandy/auros-base:hardened"
+          # skopeo is preinstalled on ubuntu-latest (measured: 1.13.3).
+          if ! DIGEST=$(skopeo inspect --no-tags "docker://$BASE_REF" 2>/dev/null | jq -r .Digest); then
+            echo "base not published yet — nothing to propagate"
+            echo "stale=[]" >> $GITHUB_OUTPUT; echo "base_digest=" >> $GITHUB_OUTPUT
+            echo "reason=base-not-published" >> $GITHUB_OUTPUT; exit 0
+          fi
+          echo "published base digest: $DIGEST"
+          echo "base_digest=$DIGEST" >> $GITHUB_OUTPUT
+
+          # A recipe is stale when its lockfile does not name the digest currently published.
+          # Missing lockfile counts as stale: a recipe that has never been built is not up to date.
+          STALE=()
+          for d in customers/*/; do
+            [ -d "$d" ] || continue
+            name=$(basename "$d")
+            lock="$d/base.lock"
+            if [ ! -f "$lock" ]; then STALE+=("$name"); continue; fi
+            if ! grep -qF "$DIGEST" "$lock"; then STALE+=("$name"); fi
+          done
+          if [ ${#STALE[@]} -eq 0 ]; then
+            echo "all recipes current"
+            echo "stale=[]" >> $GITHUB_OUTPUT; echo "reason=all-current" >> $GITHUB_OUTPUT
+          else
+            printf 'stale: %s\n' "${STALE[*]}"
+            echo "stale=$(printf '%s\n' "${STALE[@]}" | jq -R . | jq -sc .)" >> $GITHUB_OUTPUT
+            echo "reason=${{ github.event_name }}" >> $GITHUB_OUTPUT
+          fi
+          {
+            echo "## propagation"
+            echo "- trigger: \`${{ github.event_name }}\`"
+            echo "- published base: \`$DIGEST\`"
+            echo "- stale recipes: ${#STALE[@]}"
+          } >> $GITHUB_STEP_SUMMARY
+
+  rebuild:
+    needs: detect
+    if: needs.detect.outputs.stale != '[]' && needs.detect.outputs.stale != ''
+    strategy:
+      fail-fast: false          # one customer's failure must not stop another customer's patch
+      matrix:
+        recipe: ${{ fromJSON(needs.detect.outputs.stale) }}
+    uses: ./.github/workflows/build-recipe.yml
+    with:
+      recipe: ${{ matrix.recipe }}
+      base_digest: ${{ needs.detect.outputs.base_digest }}
+    secrets: inherit

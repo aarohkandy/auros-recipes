@@ -1,0 +1,39 @@
+# ILLUSTRATIVE EXAMPLE — not a customer. No organisation named here exists.
+# 40 walk-up kiosks. No desktop shell in this image. Read ../../schema/README.md first.
+
+schema: 1
+name: example-kiosk
+for: >
+  Forty counter kiosks across six walk-in service centres. A visitor sits down, uses the
+  benefits and job-search sites, prints what they need, and walks away. Nobody signs in and
+  the session is wiped behind them.
+organisation:
+  display_name: Example Community Services
+  helpdesk: { label: Front desk, phone: "+1 425 555 0178" }
+hardware:
+  machines: 40
+  models: [dell-optiplex-7010, hp-elitedesk-800-g1, lenovo-thinkcentre-m92p]
+  also_test: [bios-legacy, small-disk]
+language: English (United States)
+keyboard: English (US)
+timezone: America/Los_Angeles
+apps: [Firefox]
+prune:
+  keep_only_the_apps_above: true
+  also_keep: [printing]
+  also_remove: [bluetooth, developer tools, games, media players, office suite, remote desktop,
+                sample wallpapers and media, usb storage, virtualisation, webcam]
+  must_remove_at_least: 1100
+policy: kiosk
+kiosk:
+  opens: https://start.example.org/kiosk
+  allowed_sites: [accounts.example.org, benefits.example.org, jobs.example.org, start.example.org]
+  printing: true
+  usb_storage: false
+  forget_session_after_minutes: 8
+  restart_daily_at: "03:30"
+theme: { preset: high contrast, accent: "#be3a12", text_scale: 1.4, cursor_size: large }
+updates: { install_between: "03:00-05:00" }
+first_boot_message: Touch the screen or move the mouse to begin.
+size_budget_gb: 4
+approved_by: { enrolment: pending, name: M. Bell, role: Facilities IT, date: "2026-09-17" }

@@ -1,0 +1,36 @@
+# ILLUSTRATIVE EXAMPLE — not a customer. No organisation named here exists.
+# One dense developer desktop. Read ../../schema/README.md first.
+
+schema: 1
+name: example-workstation
+for: >
+  One developer desktop belonging to the person who maintains these recipes. It keeps the
+  ordinary desktop and adds a working set on top rather than being stripped to a handful of
+  applications, and it is the only machine in this repository with a command line.
+organisation:
+  display_name: Example Studio
+  helpdesk: { label: It is my own machine, phone: "+44 20 7946 0000" }
+hardware:
+  machines: 1
+  models: [framework-laptop-thirteen-amd]
+  also_test: [uefi-secureboot]
+language: English (United Kingdom)
+keyboard: English (UK)
+timezone: Europe/London
+apps: [Files, Firefox, GIMP, Image Viewer, Inkscape, Kate, Konsole, Podman Desktop,
+       Text Editor, Thunderbird, Visual Studio Code]
+prune:
+  keep_only_the_apps_above: false
+  also_remove: [games, sample wallpapers and media]
+  must_remove_at_least: 40
+policy: open
+desktop:
+  guided_first_boot: false
+  can_install_apps: true
+  can_reach_a_terminal: true
+windows_apps:
+  enabled: false
+theme: { preset: dark, accent: "#d9682e", text_scale: 1.0 }
+updates: { install_between: "04:00-06:00" }
+size_budget_gb: 24
+approved_by: { enrolment: pending, name: A. Kandy, role: Maintainer, date: "2026-09-20" }
