@@ -25,7 +25,6 @@
       "description": "Which version of this form you filled in. It exists so a newer compiler can never silently reinterpret an older file: if it does not recognise the number it refuses to build rather than guessing what a field used to mean.",
       "const": 1
     },
-
     "name": {
       "description": "The short name for this fleet. It must match the folder this file sits in, and no other recipe in the repository may use it. Two recipes sharing a name means two organisations sharing one image tag, so a duplicate is rejected rather than resolved. Lowercase letters, digits and single hyphens only: a dot, colon, slash or @ would let this name be read as an image tag or digest somewhere downstream, so those characters are not spellable here.",
       "type": "string",
@@ -33,19 +32,24 @@
       "minLength": 3,
       "maxLength": 40
     },
-
     "for": {
       "description": "A paragraph, in your own words, saying who these machines are for and what people do on them. Written for the person who inherits this file in eighteen months and has never met you. It is the first thing a diff between two organisations shows, and the only part of this file that explains WHY the rest of it looks the way it does. Twenty words minimum, because a blank one is a file nobody can inherit.",
-      "allOf": [{ "$ref": "#/$defs/prose" }],
+      "allOf": [
+        {
+          "$ref": "#/$defs/prose"
+        }
+      ],
       "minLength": 120,
       "maxLength": 1200
     },
-
     "organisation": {
       "description": "Who these machines belong to, and who a confused user should tell when one of them is broken.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["display_name", "helpdesk"],
+      "required": [
+        "display_name",
+        "helpdesk"
+      ],
       "properties": {
         "display_name": {
           "description": "The organisation's name as it should appear on the machine itself — the login screen, the help screen and the first-boot welcome. It is written into the image as text and is never passed to a shell, a build argument or a container instruction, so it cannot execute anything. Control characters and text-direction overrides are rejected, because a direction override makes this file read one way to the person reviewing the change and mean another to the compiler.",
@@ -55,7 +59,10 @@
           "description": "The desk a user is told to contact, printed under the start menu's Help entry and shown at first boot. Give a role and a desk line, never an individual's personal mobile: this repository is public on purpose.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["label", "phone"],
+          "required": [
+            "label",
+            "phone"
+          ],
           "properties": {
             "label": {
               "description": "What to call the desk on screen, e.g. \"School IT helpdesk\" or \"Front desk\". A help screen that says \"contact your administrator\" is not help.",
@@ -75,12 +82,14 @@
         }
       }
     },
-
     "hardware": {
       "description": "What this organisation actually owns. The virtual machines the image is tested on are derived from this block — you describe the fleet, and the test matrix follows.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["machines", "models"],
+      "required": [
+        "machines",
+        "models"
+      ],
       "properties": {
         "machines": {
           "description": "How many machines this recipe covers.",
@@ -105,60 +114,65 @@
           "type": "array",
           "uniqueItems": true,
           "maxItems": 7,
-          "items": { "$ref": "#/$defs/testProfile" }
+          "items": {
+            "$ref": "#/$defs/testProfile"
+          }
         }
       }
     },
-
     "language": {
       "description": "What the machine speaks, written the way a person says it: \"Marathi\", \"English (India)\". Not a locale code — a reader who typed mr_IN.UTF-8 cannot check it and a reader who typed Marathi can. Choosing a language also pulls in the fonts that language needs, so there is no font list here to get wrong; a first-boot screen of empty boxes is the worst possible first impression and is not something we leave to the recipe author.",
       "$ref": "#/$defs/languageName"
     },
-
     "other_languages": {
       "description": "Further languages a user may switch to from the settings screen without anyone rebuilding the image.",
       "type": "array",
       "uniqueItems": true,
       "maxItems": 8,
-      "items": { "$ref": "#/$defs/languageName" }
+      "items": {
+        "$ref": "#/$defs/languageName"
+      }
     },
-
     "keyboard": {
       "description": "The layout that matches the letters printed on the keys. This is separate from language on purpose: a Marathi machine with plain English keycaps is normal, not a mistake. Only Latin-script layouts may go here, and that is a safety rule rather than a preference — the login screen and the disk-unlock prompt appear before any input method is running, so a fleet whose primary layout cannot type a password is a fleet nobody can log into. A second script is added below, never substituted here.",
       "$ref": "#/$defs/latinKeyboard"
     },
-
     "second_script": {
       "description": "A second layout the user toggles to, for a script the keycaps do not show. Setting this requires saying how to switch to it.",
       "$ref": "#/$defs/otherScriptKeyboard"
     },
-
     "switch_scripts_with": {
       "description": "The key combination that switches between the two layouts, named the way you would say it out loud to a class. A toggle nobody can find is not a feature.",
-      "enum": ["Windows key + Spacebar", "Alt + Shift", "Ctrl + Spacebar"]
+      "enum": [
+        "Windows key + Spacebar",
+        "Alt + Shift",
+        "Ctrl + Spacebar"
+      ]
     },
-
     "timezone": {
       "description": "The clock, as an IANA zone such as Asia/Kolkata. The one place a code beats a name, because city names are ambiguous and these are already city-shaped. A raw offset like +05:30 is rejected because an offset is wrong twice a year, and \"auto\" is rejected because a machine that decides its own timezone at build or first boot has taken a fact from its surroundings, which makes two builds of the same recipe different computers.",
       "type": "string",
       "pattern": "^[A-Za-z]+(?:[_-][A-Za-z]+)*/[A-Za-z]+(?:[_-][A-Za-z]+)*(?:/[A-Za-z]+(?:[_-][A-Za-z]+)*)?$",
       "maxLength": 64
     },
-
     "apps": {
       "description": "Every application these machines have, written in the names people recognise: \"Google Chrome\", \"VLC Media Player\". These are names from the application catalogue that ships inside the base image, which is what makes this list safe to hand to someone who has never written YAML — the catalogue decides whether an application comes from the image or from Flathub, so nobody picks a security surface by accident, and nothing here reaches outside the pinned base image, so the build needs no network to work out what these words mean. A name here contains no digits at all. That is the version-pin rule, and it is stated as a shape rather than a policy: every way of writing a version number needs a digit, so firefox-140.0, Firefox 140 and foo=1.2 are not rejected requests, they are not sentences this file can contain.",
       "type": "array",
       "minItems": 1,
       "maxItems": 60,
       "uniqueItems": true,
-      "items": { "$ref": "#/$defs/appName" }
+      "items": {
+        "$ref": "#/$defs/appName"
+      }
     },
-
     "prune": {
       "description": "What gets deleted from the image. This block is the product, not an afterthought: a machine with eleven applications instead of three hundred is the entire thing we sell, and every build writes REMOVED.md next to this file naming what went and why. Read schema/PROTECTED.md before editing it.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["keep_only_the_apps_above", "must_remove_at_least"],
+      "required": [
+        "keep_only_the_apps_above",
+        "must_remove_at_least"
+      ],
       "properties": {
         "keep_only_the_apps_above": {
           "description": "The whole \"remove everything except these eleven things\" instruction, in one line, pointing at the apps list directly above it. The keep list and the install list are the same list, so they cannot drift apart. Set it to false when you want a normal desktop with a few things taken out instead, and then say what to take out below.",
@@ -170,7 +184,14 @@
           "uniqueItems": true,
           "maxItems": 8,
           "items": {
-            "enum": ["printing", "scanning", "bluetooth", "webcam", "smartcard readers", "wired networking"]
+            "enum": [
+              "printing",
+              "scanning",
+              "bluetooth",
+              "webcam",
+              "smartcard readers",
+              "wired networking"
+            ]
           }
         },
         "also_remove": {
@@ -180,7 +201,9 @@
           "maxItems": 12,
           "items": {
             "allOf": [
-              { "$ref": "#/$defs/removableGroup" },
+              {
+                "$ref": "#/$defs/removableGroup"
+              },
               {
                 "title": "Accessibility is not removable",
                 "description": "We do not sell an image a disabled pupil cannot use. A screen reader, a magnifier, an on-screen keyboard and high-contrast themes stay in every image we ship, in every policy mode, and this refusal is printed rather than applied silently so the rule teaches itself.",
@@ -206,12 +229,15 @@
         }
       }
     },
-
     "policy": {
       "description": "How locked down these machines are, in one word with a published meaning. There is no fifth value and no custom mode: a mode we cannot prove is in force on a booted machine is a mode we cannot sell. open — a normal computer, the user is in charge. managed — the user works, the organisation owns the settings. locked — the user may not install anything or change anything. kiosk — no desktop at all; see the kiosk block, and see README for exactly what kiosk does and does not remove.",
-      "enum": ["open", "managed", "locked", "kiosk"]
+      "enum": [
+        "open",
+        "managed",
+        "locked",
+        "kiosk"
+      ]
     },
-
     "desktop": {
       "description": "The Windows-shaped layer, one readable line per behaviour, shipped in the image rather than left for each user to set up. Everything here defaults to the familiar answer, so this whole block is optional and most recipes leave it out.",
       "type": "object",
@@ -254,12 +280,15 @@
         }
       }
     },
-
     "kiosk": {
       "description": "Required when the policy is kiosk, and rejected otherwise. One window, one job, nobody signs in, nothing is kept.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["opens", "allowed_sites", "forget_session_after_minutes"],
+      "required": [
+        "opens",
+        "allowed_sites",
+        "forget_session_after_minutes"
+      ],
       "properties": {
         "opens": {
           "description": "The page the machine shows. It must be https and it must be a page: a plain address with an ordinary path, no query string, no username in front of the host. http://, file:// and data: are not spellable here, because a local-content address is a way out of the kiosk rather than a page inside it.",
@@ -273,7 +302,9 @@
           "minItems": 1,
           "maxItems": 25,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/hostname" }
+          "items": {
+            "$ref": "#/$defs/hostname"
+          }
         },
         "printing": {
           "description": "Whether the person at the machine may print.",
@@ -298,12 +329,13 @@
         }
       }
     },
-
     "windows_apps": {
       "description": "The honest .exe capability. Turning it on installs a Windows-compatibility application from Flathub and claims nothing further. There is deliberately no field here for a general statement — no percentage, no \"compatibility: good\", no \"most programs work\" — so a blanket claim is not something a recipe can contain and therefore not something the website can render.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled"],
+      "required": [
+        "enabled"
+      ],
       "properties": {
         "enabled": {
           "description": "Whether the Windows-compatibility layer is installed on these machines.",
@@ -320,7 +352,11 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["app", "date", "result"],
+            "required": [
+              "app",
+              "date",
+              "result"
+            ],
             "properties": {
               "app": {
                 "description": "The Windows program, named the way its own installer names it.",
@@ -332,7 +368,12 @@
               },
               "result": {
                 "description": "What happened, from a closed set. There is no value between these four and no way to leave it vague.",
-                "enum": ["works", "works with caveats", "fails", "untested"]
+                "enum": [
+                  "works",
+                  "works with caveats",
+                  "fails",
+                  "untested"
+                ]
               },
               "note": {
                 "description": "What a user will actually see. Required for anything other than an outright failure or an untried program, because \"works with caveats\" without the caveats is a claim rather than evidence.",
@@ -343,8 +384,24 @@
               {
                 "title": "A positive result needs its caveats written down",
                 "description": "If you say a program works, or works with caveats, say what a user will see. This is how a compatibility claim stays a piece of evidence instead of becoming a promise.",
-                "if": { "properties": { "result": { "enum": ["works", "works with caveats"] } }, "required": ["result"] },
-                "then": { "required": ["note"] }
+                "if": {
+                  "properties": {
+                    "result": {
+                      "enum": [
+                        "works",
+                        "works with caveats"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "result"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "note"
+                  ]
+                }
               }
             ]
           }
@@ -354,23 +411,56 @@
         {
           "title": "Enabling the layer requires the honest sentence",
           "description": "The only way to turn on Windows-program support is to also write down, in this file, that nothing beyond the tested list is promised.",
-          "if": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] },
-          "then": { "required": ["we_promise_nothing_else"] }
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "required": [
+              "we_promise_nothing_else"
+            ]
+          }
         },
         {
           "title": "No compatibility claims when the layer is off",
           "description": "A machine without the compatibility layer cannot run any of these programs, so a list of tested programs beside a disabled layer would be a claim about something that is not installed.",
-          "if": { "properties": { "enabled": { "const": false } }, "required": ["enabled"] },
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": false
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
           "then": {
             "allOf": [
-              { "not": { "required": ["tested"] } },
-              { "not": { "required": ["we_promise_nothing_else"] } }
+              {
+                "not": {
+                  "required": [
+                    "tested"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "we_promise_nothing_else"
+                  ]
+                }
+              }
             ]
           }
         }
       ]
     },
-
     "theme": {
       "description": "How it looks. Named choices and one accent colour, not a stylesheet: a theme file is arbitrary content, and a preset plus a colour is not.",
       "type": "object",
@@ -378,7 +468,13 @@
       "properties": {
         "preset": {
           "description": "The overall look.",
-          "enum": ["light", "dark", "high contrast", "follow the system", "user chooses"]
+          "enum": [
+            "light",
+            "dark",
+            "high contrast",
+            "follow the system",
+            "user chooses"
+          ]
         },
         "accent": {
           "description": "The organisation's colour, as a six-digit hex value in lowercase. Lowercase is required so that two recipes differing only in the case of a colour cannot produce two different images.",
@@ -387,15 +483,30 @@
         },
         "text_scale": {
           "description": "How large text is. On a ten-year-old laptop with a small screen this is the difference between usable and not.",
-          "enum": [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0]
+          "enum": [
+            0.8,
+            0.9,
+            1.0,
+            1.1,
+            1.2,
+            1.3,
+            1.4,
+            1.5,
+            1.75,
+            2.0
+          ]
         },
         "cursor_size": {
           "description": "The mouse pointer size. \"hidden\" is for touchscreens with no mouse attached.",
-          "enum": ["normal", "large", "extra large", "hidden"]
+          "enum": [
+            "normal",
+            "large",
+            "extra large",
+            "hidden"
+          ]
         }
       }
     },
-
     "updates": {
       "description": "When patches land. Note what is missing: there is no field to switch updating off, no field to hold a package at an old version, and no field to stay on an older image. A machine that stops updating is the abandoned laptop we sell against, so it is not a state this file can ask for.",
       "type": "object",
@@ -408,31 +519,42 @@
         }
       }
     },
-
     "first_boot_message": {
       "description": "The sentence a stranger reads first, in their own language. It is written into the image as a text file and displayed; it is never placed into a build instruction, a service definition or a shell command, so there is nothing in it that could run. Text-direction overrides and control characters are rejected. If the language you chose above cannot draw the characters you typed here, the build stops and says so rather than shipping a screen of empty boxes.",
-      "allOf": [{ "$ref": "#/$defs/prose" }],
+      "allOf": [
+        {
+          "$ref": "#/$defs/prose"
+        }
+      ],
       "maxLength": 400
     },
-
     "size_budget_gb": {
       "description": "How large the finished image is allowed to be. The build fails if it exceeds this, and it fails if it grows more than ten per cent against the last published build. Subtraction is the product, so an image that quietly grows is the product quietly failing. Declare what you are buying.",
       "type": "number",
       "minimum": 2,
       "maximum": 40
     },
-
     "approved_by": {
       "description": "A named human who signed off on this fleet. The signature itself lives outside this file — this block carries a reference to the enrolment record, not the claim, because an approval asserted inside the very file being changed proves nothing. Until the reference resolves, the recipe still test-builds, which is what \"charged only once the test build passes\" needs, but no image reaches a machine.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["enrolment", "name", "role", "date"],
+      "required": [
+        "enrolment",
+        "name",
+        "role",
+        "date"
+      ],
       "properties": {
         "enrolment": {
           "description": "The enrolment record this approval lives in, kept outside this repository. The word \"pending\" is allowed and blocks publishing while still allowing a test build.",
           "oneOf": [
-            { "const": "pending" },
-            { "type": "string", "pattern": "^[A-Z]{2,6}-[0-9]{4}-[0-9]{3,6}$" }
+            {
+              "const": "pending"
+            },
+            {
+              "type": "string",
+              "pattern": "^[A-Z]{2,6}-[0-9]{4}-[0-9]{3,6}$"
+            }
           ]
         },
         "name": {
@@ -450,64 +572,167 @@
       }
     }
   },
-
   "allOf": [
     {
       "title": "A second script needs a way to switch to it",
       "description": "Adding a layout for another script without saying how to reach it gives users a feature they cannot find.",
-      "if": { "required": ["second_script"] },
-      "then": { "required": ["switch_scripts_with"] }
+      "if": {
+        "required": [
+          "second_script"
+        ]
+      },
+      "then": {
+        "required": [
+          "switch_scripts_with"
+        ]
+      }
     },
     {
       "title": "Do not name a switch when there is nothing to switch to",
       "description": "A key combination with only one layout installed does nothing, and a line in this file that does nothing is a line the next reader will trust.",
-      "if": { "required": ["switch_scripts_with"] },
-      "then": { "required": ["second_script"] }
+      "if": {
+        "required": [
+          "switch_scripts_with"
+        ]
+      },
+      "then": {
+        "required": [
+          "second_script"
+        ]
+      }
     },
     {
       "title": "Kiosk requires the kiosk block",
       "description": "Choosing kiosk without saying what the kiosk shows leaves a machine with no desktop and no page — not secure, just broken.",
-      "if": { "properties": { "policy": { "const": "kiosk" } }, "required": ["policy"] },
-      "then": { "required": ["kiosk"] }
+      "if": {
+        "properties": {
+          "policy": {
+            "const": "kiosk"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      },
+      "then": {
+        "required": [
+          "kiosk"
+        ]
+      }
     },
     {
       "title": "The kiosk block belongs only to kiosk machines",
       "description": "A kiosk block under any other policy describes behaviour that will not happen, which is worse than describing nothing.",
-      "if": { "not": { "properties": { "policy": { "const": "kiosk" } }, "required": ["policy"] } },
-      "then": { "not": { "required": ["kiosk"] } }
+      "if": {
+        "not": {
+          "properties": {
+            "policy": {
+              "const": "kiosk"
+            }
+          },
+          "required": [
+            "policy"
+          ]
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "kiosk"
+          ]
+        }
+      }
     },
     {
       "title": "A kiosk has no desktop to shape",
       "description": "Kiosk means the desktop shell and the display manager are not in the image, so there is no taskbar, no start menu and no file manager to configure. A desktop block here would make this file look as though the machine had a desktop when the image contains none, so it is refused rather than ignored.",
-      "if": { "properties": { "policy": { "const": "kiosk" } }, "required": ["policy"] },
-      "then": { "not": { "required": ["desktop"] } }
+      "if": {
+        "properties": {
+          "policy": {
+            "const": "kiosk"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "desktop"
+          ]
+        }
+      }
     },
     {
       "title": "A kiosk cannot run Windows programs",
       "description": "The compatibility layer is a desktop application, and a kiosk has no desktop to run it on.",
-      "if": { "properties": { "policy": { "const": "kiosk" } }, "required": ["policy"] },
-      "then": { "not": { "required": ["windows_apps"] } }
+      "if": {
+        "properties": {
+          "policy": {
+            "const": "kiosk"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "windows_apps"
+          ]
+        }
+      }
     },
     {
       "title": "A kiosk keeps only what it opens",
       "description": "A kiosk exists to do one thing. If it is keeping a general set of applications it is not a kiosk, it is a locked desktop, and that is a different word with a different promise.",
-      "if": { "properties": { "policy": { "const": "kiosk" } }, "required": ["policy"] },
+      "if": {
+        "properties": {
+          "policy": {
+            "const": "kiosk"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      },
       "then": {
         "properties": {
-          "prune": { "properties": { "keep_only_the_apps_above": { "const": true } } }
+          "prune": {
+            "properties": {
+              "keep_only_the_apps_above": {
+                "const": true
+              }
+            }
+          }
         }
       }
     },
     {
       "title": "Locked means locked",
       "description": "Under the locked policy a user may not add applications and may not reach a command line. Writing otherwise is a contradiction between the word you chose and the lines underneath it, so the file is refused rather than one of them quietly winning.",
-      "if": { "properties": { "policy": { "const": "locked" } }, "required": ["policy"] },
+      "if": {
+        "properties": {
+          "policy": {
+            "const": "locked"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      },
       "then": {
         "properties": {
           "desktop": {
             "properties": {
-              "can_install_apps": { "const": false },
-              "can_reach_a_terminal": { "const": false }
+              "can_install_apps": {
+                "const": false
+              },
+              "can_reach_a_terminal": {
+                "const": false
+              }
             }
           }
         }
@@ -517,35 +742,99 @@
       "title": "A terminal only exists on an open machine",
       "description": "Nothing this product promises needs a command line. A reachable terminal is therefore only ever a deliberate choice on a machine whose policy is open, and never something a managed or locked fleet ends up with by accident.",
       "if": {
-        "properties": { "desktop": { "properties": { "can_reach_a_terminal": { "const": true } }, "required": ["can_reach_a_terminal"] } },
-        "required": ["desktop"]
+        "properties": {
+          "desktop": {
+            "properties": {
+              "can_reach_a_terminal": {
+                "const": true
+              }
+            },
+            "required": [
+              "can_reach_a_terminal"
+            ]
+          }
+        },
+        "required": [
+          "desktop"
+        ]
       },
-      "then": { "properties": { "policy": { "const": "open" } }, "required": ["policy"] }
+      "then": {
+        "properties": {
+          "policy": {
+            "const": "open"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      }
     },
     {
       "title": "Keeping a normal desktop means saying what to take out of it",
       "description": "Setting keep_only_the_apps_above to false keeps the base's ordinary desktop. That is a legal choice, but it has to be an instruction rather than a silence, so at least one group must be named for removal and the removal report is never empty by accident.",
       "if": {
-        "properties": { "prune": { "properties": { "keep_only_the_apps_above": { "const": false } }, "required": ["keep_only_the_apps_above"] } },
-        "required": ["prune"]
+        "properties": {
+          "prune": {
+            "properties": {
+              "keep_only_the_apps_above": {
+                "const": false
+              }
+            },
+            "required": [
+              "keep_only_the_apps_above"
+            ]
+          }
+        },
+        "required": [
+          "prune"
+        ]
       },
       "then": {
-        "properties": { "prune": { "required": ["also_remove"], "properties": { "also_remove": { "minItems": 1 } } } }
+        "properties": {
+          "prune": {
+            "required": [
+              "also_remove"
+            ],
+            "properties": {
+              "also_remove": {
+                "minItems": 1
+              }
+            }
+          }
+        }
       }
     },
-
-    { "$ref": "#/$defs/refusals/base" },
-    { "$ref": "#/$defs/refusals/kernel" },
-    { "$ref": "#/$defs/refusals/pins" },
-    { "$ref": "#/$defs/refusals/scripts" },
-    { "$ref": "#/$defs/refusals/repos" },
-    { "$ref": "#/$defs/refusals/files" },
-    { "$ref": "#/$defs/refusals/gates" },
-    { "$ref": "#/$defs/refusals/secrets" },
-    { "$ref": "#/$defs/refusals/rollback" },
-    { "$ref": "#/$defs/refusals/claims" }
+    {
+      "$ref": "#/$defs/refusals/base"
+    },
+    {
+      "$ref": "#/$defs/refusals/kernel"
+    },
+    {
+      "$ref": "#/$defs/refusals/pins"
+    },
+    {
+      "$ref": "#/$defs/refusals/scripts"
+    },
+    {
+      "$ref": "#/$defs/refusals/repos"
+    },
+    {
+      "$ref": "#/$defs/refusals/files"
+    },
+    {
+      "$ref": "#/$defs/refusals/gates"
+    },
+    {
+      "$ref": "#/$defs/refusals/secrets"
+    },
+    {
+      "$ref": "#/$defs/refusals/rollback"
+    },
+    {
+      "$ref": "#/$defs/refusals/claims"
+    }
   ],
-
   "$defs": {
     "line": {
       "description": "A single line of text a person wrote. No line breaks, no control characters, and no text-direction overrides — an override would let this file read one way in a change review and mean another to the compiler, in a repository whose entire pitch is that you can read the file and it IS the machine.",
@@ -554,28 +843,24 @@
       "maxLength": 200,
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069]+$"
     },
-
     "prose": {
       "description": "A paragraph a person wrote. Line breaks and tabs are allowed; carriage returns, other control characters and text-direction overrides are not.",
       "type": "string",
       "minLength": 1,
       "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069]+$"
     },
-
     "date": {
       "description": "A calendar day, written YYYY-MM-DD.",
       "type": "string",
       "format": "date",
       "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$"
     },
-
     "hostname": {
       "description": "A single hostname in lowercase, with no scheme, no port, no path and no wildcard.",
       "type": "string",
       "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
       "maxLength": 200
     },
-
     "appName": {
       "description": "An application, by the name the catalogue inside the base image gives it — words made of letters, separated by single spaces. No digits anywhere. That single rule is what makes a version pin unspellable rather than merely forbidden: firefox-140.0, Firefox 140, kernel>=6.1 and foo=1.2 all need a character this shape does not have. A raw package or Flatpak identifier is also unspellable, and that is deliberate too, because three different spellings of the same product are three different security surfaces and the reader cannot tell which one they got.",
       "type": "string",
@@ -583,7 +868,6 @@
       "minLength": 2,
       "maxLength": 48
     },
-
     "languageName": {
       "description": "A language as a person names it, optionally with a country in brackets: Marathi, English (India), Portuguese (Brazil). No codes, no digits.",
       "type": "string",
@@ -591,7 +875,6 @@
       "minLength": 3,
       "maxLength": 48
     },
-
     "latinKeyboard": {
       "description": "A Latin-script keyboard layout. Only these may be a machine's primary layout, because the login screen and the disk-unlock prompt come up before any input method is running.",
       "enum": [
@@ -612,7 +895,6 @@
         "Swahili"
       ]
     },
-
     "otherScriptKeyboard": {
       "description": "A layout for a script the keycaps do not show. It is always an addition to the Latin layout, never a replacement for it.",
       "enum": [
@@ -630,7 +912,6 @@
         "Amharic"
       ]
     },
-
     "testProfile": {
       "description": "A virtual test machine the image must boot and behave on before it may be published.",
       "enum": [
@@ -643,7 +924,6 @@
         "tpm12"
       ]
     },
-
     "removableGroup": {
       "description": "A named group of things that may be deleted. This list is the entire vocabulary of removal. Nothing the machine needs in order to start, to update itself, to verify what it installs, to reach the network or to roll back a failed update appears anywhere in it, so there is no way to write the sentence that would brick a fleet.",
       "enum": [
@@ -661,156 +941,477 @@
         "webcam"
       ]
     },
-
     "refusals": {
       "description": "Keys that are refused by name, each with the reason printed. Unknown keys are already rejected everywhere in this schema; these entries exist so that a well-meaning author gets an explanation instead of \"unexpected property\".",
-
       "base": {
         "title": "There is no field for the base image, and that is the point",
         "description": "Recipes do not name what they are built on. The FROM line is written by the compiler from the single configuration file that holds the namespace, and nothing in this file can influence it — not a registry, not a tag, not a digest. A digest is refused too, and for a reason worth understanding: pinning a customer to one base image freezes them off the rebuild that carries the next security fix, which turns the machine we sold into the abandoned machine we sell against. Every organisation is on the same foundation. One that genuinely needs a different one is a conversation with a person, not an edit to this file.",
-        "allOf": [
-          { "not": { "required": ["from"] } },
-          { "not": { "required": ["base"] } },
-          { "not": { "required": ["image"] } },
-          { "not": { "required": ["registry"] } },
-          { "not": { "required": ["digest"] } },
-          { "not": { "required": ["containerfile"] } },
-          { "not": { "required": ["dockerfile"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "from"
+              ]
+            },
+            {
+              "required": [
+                "base"
+              ]
+            },
+            {
+              "required": [
+                "image"
+              ]
+            },
+            {
+              "required": [
+                "registry"
+              ]
+            },
+            {
+              "required": [
+                "digest"
+              ]
+            },
+            {
+              "required": [
+                "containerfile"
+              ]
+            },
+            {
+              "required": [
+                "dockerfile"
+              ]
+            }
+          ]
+        }
       },
-
       "kernel": {
         "title": "A recipe cannot choose a kernel, a driver or a boot argument",
         "description": "The kernel, its modules, out-of-tree drivers and the boot command line belong to the base image, where one team patches them once for everybody. A per-recipe kernel is a fork wearing a smaller hat: the moment one organisation is on a different kernel, a security fix stops being one rebuild and becomes a spreadsheet. If what you actually want is a quieter or noisier boot, ask for that as a change to the base, where it becomes one audited setting for every fleet rather than a command line one organisation can edit.",
-        "allOf": [
-          { "not": { "required": ["kernel"] } },
-          { "not": { "required": ["kernel_args"] } },
-          { "not": { "required": ["kargs"] } },
-          { "not": { "required": ["cmdline"] } },
-          { "not": { "required": ["modules"] } },
-          { "not": { "required": ["dkms"] } },
-          { "not": { "required": ["drivers"] } },
-          { "not": { "required": ["firmware"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "kernel"
+              ]
+            },
+            {
+              "required": [
+                "kernel_args"
+              ]
+            },
+            {
+              "required": [
+                "kargs"
+              ]
+            },
+            {
+              "required": [
+                "cmdline"
+              ]
+            },
+            {
+              "required": [
+                "modules"
+              ]
+            },
+            {
+              "required": [
+                "dkms"
+              ]
+            },
+            {
+              "required": [
+                "drivers"
+              ]
+            },
+            {
+              "required": [
+                "firmware"
+              ]
+            }
+          ]
+        }
       },
-
       "pins": {
         "title": "Nothing can be held at a version",
         "description": "There is no pin, no hold, no exclude and no minimum version, and the applications list has no shape that could carry one. Holding a package back is how a machine ends up unpatched while still appearing to be maintained, which is the exact failure we exist to fix. If a new version of something broke your fleet, that is a report we want and a fix in the base — not a line in one organisation's file that quietly keeps them behind.",
-        "allOf": [
-          { "not": { "required": ["pin"] } },
-          { "not": { "required": ["pins"] } },
-          { "not": { "required": ["hold"] } },
-          { "not": { "required": ["holdback"] } },
-          { "not": { "required": ["version"] } },
-          { "not": { "required": ["versions"] } },
-          { "not": { "required": ["exclude"] } },
-          { "not": { "required": ["excludes"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "pin"
+              ]
+            },
+            {
+              "required": [
+                "pins"
+              ]
+            },
+            {
+              "required": [
+                "hold"
+              ]
+            },
+            {
+              "required": [
+                "holdback"
+              ]
+            },
+            {
+              "required": [
+                "version"
+              ]
+            },
+            {
+              "required": [
+                "versions"
+              ]
+            },
+            {
+              "required": [
+                "exclude"
+              ]
+            },
+            {
+              "required": [
+                "excludes"
+              ]
+            }
+          ]
+        }
       },
-
       "scripts": {
         "title": "A recipe cannot run code",
         "description": "There is no script, no hook, no command and no environment variable. Every effect a recipe can have is a field in this schema, written in words, reviewable by someone who does not write software. A shell line is the opposite of that: it is unreadable to the person the file is for, unauditable in a change review, and unbounded in what it can do inside a build that holds the key we sign images with. If the effect you need is not a field here, that is a conversation with a person, not a command.",
-        "allOf": [
-          { "not": { "required": ["run"] } },
-          { "not": { "required": ["script"] } },
-          { "not": { "required": ["scripts"] } },
-          { "not": { "required": ["post_install"] } },
-          { "not": { "required": ["pre_install"] } },
-          { "not": { "required": ["firstboot_script"] } },
-          { "not": { "required": ["hooks"] } },
-          { "not": { "required": ["env"] } },
-          { "not": { "required": ["cmd"] } },
-          { "not": { "required": ["entrypoint"] } },
-          { "not": { "required": ["build_args"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "run"
+              ]
+            },
+            {
+              "required": [
+                "script"
+              ]
+            },
+            {
+              "required": [
+                "scripts"
+              ]
+            },
+            {
+              "required": [
+                "post_install"
+              ]
+            },
+            {
+              "required": [
+                "pre_install"
+              ]
+            },
+            {
+              "required": [
+                "firstboot_script"
+              ]
+            },
+            {
+              "required": [
+                "hooks"
+              ]
+            },
+            {
+              "required": [
+                "env"
+              ]
+            },
+            {
+              "required": [
+                "cmd"
+              ]
+            },
+            {
+              "required": [
+                "entrypoint"
+              ]
+            },
+            {
+              "required": [
+                "build_args"
+              ]
+            }
+          ]
+        }
       },
-
       "repos": {
         "title": "A recipe cannot add a software source",
         "description": "No extra repositories, no copr, no third-party package feed, and no way to switch off signature checking on a package. Everything a recipe can install comes from inside the base image or from the application catalogue that ships with it, which is what makes the build reproducible without a network and what keeps the list of people who can put code on a school's laptops short and known.",
-        "allOf": [
-          { "not": { "required": ["repos"] } },
-          { "not": { "required": ["repositories"] } },
-          { "not": { "required": ["copr"] } },
-          { "not": { "required": ["sources"] } },
-          { "not": { "required": ["nogpgcheck"] } },
-          { "not": { "required": ["insecure"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "repos"
+              ]
+            },
+            {
+              "required": [
+                "repositories"
+              ]
+            },
+            {
+              "required": [
+                "copr"
+              ]
+            },
+            {
+              "required": [
+                "sources"
+              ]
+            },
+            {
+              "required": [
+                "nogpgcheck"
+              ]
+            },
+            {
+              "required": [
+                "insecure"
+              ]
+            }
+          ]
+        }
       },
-
       "files": {
         "title": "A recipe cannot drop arbitrary files into the image",
         "description": "No file overlay, no patch, no service definition, no configuration fragment. The only thing a recipe brings in from outside its own text is a logo, which is a picture in a known format that the build decodes and re-encodes before it goes anywhere. Everything else the image contains comes from a field with a name and a description, because \"the file IS the machine\" stops being true the moment part of the machine is an attachment nobody can read in a diff.",
-        "allOf": [
-          { "not": { "required": ["files"] } },
-          { "not": { "required": ["overlay"] } },
-          { "not": { "required": ["patch"] } },
-          { "not": { "required": ["patches"] } },
-          { "not": { "required": ["systemd_units"] } },
-          { "not": { "required": ["config"] } },
-          { "not": { "required": ["ostree"] } },
-          { "not": { "required": ["rpm_ostree"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "files"
+              ]
+            },
+            {
+              "required": [
+                "overlay"
+              ]
+            },
+            {
+              "required": [
+                "patch"
+              ]
+            },
+            {
+              "required": [
+                "patches"
+              ]
+            },
+            {
+              "required": [
+                "systemd_units"
+              ]
+            },
+            {
+              "required": [
+                "config"
+              ]
+            },
+            {
+              "required": [
+                "ostree"
+              ]
+            },
+            {
+              "required": [
+                "rpm_ostree"
+              ]
+            }
+          ]
+        }
       },
-
       "gates": {
         "title": "There is no way to ask for less testing",
         "description": "No skip, no override, no force, no publish-without-test, no unsigned. An unsigned or untested image can never reach a customer, and the strongest way to write that rule is a file that cannot express the request. Tests may only be added — see also_test — never taken away. If a check is wrong, the check gets fixed for everybody in the open, which is slower and is the correct speed.",
-        "allOf": [
-          { "not": { "required": ["skip_checks"] } },
-          { "not": { "required": ["skip_tests"] } },
-          { "not": { "required": ["skip"] } },
-          { "not": { "required": ["force"] } },
-          { "not": { "required": ["publish_without_test"] } },
-          { "not": { "required": ["allow_untested"] } },
-          { "not": { "required": ["unsigned"] } },
-          { "not": { "required": ["signature"] } },
-          { "not": { "required": ["signing"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "skip_checks"
+              ]
+            },
+            {
+              "required": [
+                "skip_tests"
+              ]
+            },
+            {
+              "required": [
+                "skip"
+              ]
+            },
+            {
+              "required": [
+                "force"
+              ]
+            },
+            {
+              "required": [
+                "publish_without_test"
+              ]
+            },
+            {
+              "required": [
+                "allow_untested"
+              ]
+            },
+            {
+              "required": [
+                "unsigned"
+              ]
+            },
+            {
+              "required": [
+                "signature"
+              ]
+            },
+            {
+              "required": [
+                "signing"
+              ]
+            }
+          ]
+        }
       },
-
       "secrets": {
         "title": "No credential of any kind belongs in this file",
         "description": "This repository is public on purpose — it is how an organisation keeps its exact operating system if we disappear. Anything written here is published to the world by design, so there is no field for a password, a network key, a token or a licence. This is a real gap and we are not pretending otherwise: a school fleet needs a wireless network and a printer on day one, and the way that arrives is a sealed enrolment bundle handed over separately, never a line in here.",
-        "allOf": [
-          { "not": { "required": ["password"] } },
-          { "not": { "required": ["passphrase"] } },
-          { "not": { "required": ["secret"] } },
-          { "not": { "required": ["secrets"] } },
-          { "not": { "required": ["token"] } },
-          { "not": { "required": ["api_key"] } },
-          { "not": { "required": ["psk"] } },
-          { "not": { "required": ["wifi_password"] } },
-          { "not": { "required": ["credentials"] } },
-          { "not": { "required": ["licence_key"] } },
-          { "not": { "required": ["license_key"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "password"
+              ]
+            },
+            {
+              "required": [
+                "passphrase"
+              ]
+            },
+            {
+              "required": [
+                "secret"
+              ]
+            },
+            {
+              "required": [
+                "secrets"
+              ]
+            },
+            {
+              "required": [
+                "token"
+              ]
+            },
+            {
+              "required": [
+                "api_key"
+              ]
+            },
+            {
+              "required": [
+                "psk"
+              ]
+            },
+            {
+              "required": [
+                "wifi_password"
+              ]
+            },
+            {
+              "required": [
+                "credentials"
+              ]
+            },
+            {
+              "required": [
+                "licence_key"
+              ]
+            },
+            {
+              "required": [
+                "license_key"
+              ]
+            }
+          ]
+        }
       },
-
       "rollback": {
         "title": "The safety net is not optional",
         "description": "There is no field to switch off automatic rollback, to keep fewer copies of the operating system on disk, or to stop the machine checking that it reached a login screen. A school has nobody standing at the machine when an update goes wrong, so the machine putting itself back is not a feature a recipe gets to decline.",
-        "allOf": [
-          { "not": { "required": ["rollback"] } },
-          { "not": { "required": ["greenboot"] } },
-          { "not": { "required": ["deployments"] } },
-          { "not": { "required": ["auto_update"] } },
-          { "not": { "required": ["disable_updates"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "rollback"
+              ]
+            },
+            {
+              "required": [
+                "greenboot"
+              ]
+            },
+            {
+              "required": [
+                "deployments"
+              ]
+            },
+            {
+              "required": [
+                "auto_update"
+              ]
+            },
+            {
+              "required": [
+                "disable_updates"
+              ]
+            }
+          ]
+        }
       },
-
       "claims": {
         "title": "A recipe cannot make a general claim",
         "description": "There is no field for a compatibility percentage, a savings figure, a device count or a quote from a customer. The website renders what is in these files, so a claim that cannot be written here cannot appear there. What can be written is evidence: a named program, the day somebody ran it, and one of four results.",
-        "allOf": [
-          { "not": { "required": ["compatibility"] } },
-          { "not": { "required": ["testimonial"] } },
-          { "not": { "required": ["testimonials"] } },
-          { "not": { "required": ["savings"] } },
-          { "not": { "required": ["case_study"] } }
-        ]
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "compatibility"
+              ]
+            },
+            {
+              "required": [
+                "testimonial"
+              ]
+            },
+            {
+              "required": [
+                "testimonials"
+              ]
+            },
+            {
+              "required": [
+                "savings"
+              ]
+            },
+            {
+              "required": [
+                "case_study"
+              ]
+            }
+          ]
+        }
       }
     }
   }
