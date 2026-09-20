@@ -169,6 +169,22 @@ function valueAt(doc: unknown, instancePath: string): unknown {
   return node;
 }
 
+/**
+ * A value, quoted, for a message a person reads.
+ *
+ * Truncated, because a recipe is a pull request from a stranger and one of the things a stranger can
+ * send is a ten-megabyte string. Echoing it whole would turn a refusal into a denial of service
+ * against whoever is reading the CI log.
+ */
+const SHOW_LIMIT = 60;
+function show(value: unknown): string {
+  if (typeof value !== 'string') return `'${String(value)}'`;
+  // Control characters are what the display_name pattern exists to refuse, so they must not be
+  // echoed raw into a terminal that would act on them.
+  const safe = value.replace(/[ --​-‏‪-‮⁠-⁯]/g, '�');
+  return safe.length > SHOW_LIMIT ? `'${safe.slice(0, SHOW_LIMIT)}...' (${value.length} characters)` : `'${safe}'`;
+}
+
 const UNKNOWN_KEY_WHY =
   'Every effect a recipe can have is a named field with a description. An unknown key is refused ' +
   'rather than ignored, because a subtraction instruction that is quietly dropped means the prune ' +
@@ -250,6 +266,28 @@ export function schemaRefusals(compiled: CompiledSchema, doc: unknown): Refusal[
 
     if (authored) {
       push(out, seen, refuse(where, authored.title, authored.description));
+      continue;
+    }
+
+    if (error.keyword === 'pattern') {
+      // ajv's message for a pattern is the pattern: `must match pattern
+      // "^[A-Za-z][A-Za-z+#]*(?: [A-Za-z][A-Za-z+#]*)*$"`. That is the single most common refusal
+      // this toolchain produces -- every version pin, every homoglyph, every path traversal in a
+      // name arrives here -- and it is addressed to an IT coordinator at a school, who is owed a
+      // sentence rather than a regular expression. The SHAPE is the rule, and every one of these
+      // fields already explains its shape in words, in `why`, which is where a reader should look.
+      const value = show(valueAt(doc, error.instancePath));
+      push(
+        out,
+        seen,
+        refuse(
+          where,
+          `${value} is not a value this field can hold. The rule here is the shape of what you can ` +
+            'write, not a list of things we decided to block, so this is not a request that was ' +
+            'refused -- it is a sentence this file cannot contain.',
+          descriptionFor(root, error.schemaPath) ?? '',
+        ),
+      );
       continue;
     }
 

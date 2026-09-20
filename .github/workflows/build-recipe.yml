@@ -22,19 +22,38 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04     # pinned: ubuntu-latest migrates to 26.04 between 2026-10-19 and 11-19 (D23)
     timeout-minutes: 120
+    env:
+      # THE RECIPE NAME ARRIVES IN A PULL REQUEST FROM THE INTERNET.
+      #
+      # `${{ }}` inside a `run:` block is textual substitution performed BEFORE bash sees the script,
+      # so every interpolation of an attacker-influenced value is an injection site — a name
+      # containing a quote and a semicolon becomes commands. Binding it once to an environment
+      # variable here means every step refers to "$RECIPE", which bash treats as data no matter what
+      # it contains.
+      #
+      # The schema constrains the name as well. This is the second layer, because the first one being
+      # correct is not something a publish step should have to assume.
+      RECIPE: ${RECIPE}
+      BASE_DIGEST: ${BASE_DIGEST}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with: { repository: aarohkandy/auros-base, path: .auros-base }
+      # The namespace. `compile` writes the FROM line from auros.config.json and has no literal to
+      # fall back on (DECISIONS.md D1), so the control repo has to be here. src/config.ts looks in
+      # .auros-meta/ by name. The two repository names on these lines are the bootstrap: a workflow
+      # cannot read the namespace file before it has fetched the file that holds it.
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros, path: .auros-meta }
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: corepack enable && pnpm install --frozen-lockfile
 
       - name: Validate — a recipe may only ADD
         run: |
-          R="customers/${{ inputs.recipe }}/recipe.yaml"
+          R="customers/${RECIPE}/recipe.yaml"
           echo "::group::validate"
           node dist/cli.js validate "$R"
           echo "::endgroup::"
@@ -51,8 +70,8 @@ jobs:
       - name: Compile, and refuse to proceed if the committed Containerfile has drifted
         id: build
         run: |
-          R="customers/${{ inputs.recipe }}/recipe.yaml"
-          C="customers/${{ inputs.recipe }}/Containerfile"
+          R="customers/${RECIPE}/recipe.yaml"
+          C="customers/${RECIPE}/Containerfile"
           node dist/cli.js compile "$R" > /tmp/Containerfile.fresh
 
           # D28. The Containerfile is COMMITTED next to the recipe, because the FAQ tells a customer
@@ -73,35 +92,72 @@ jobs:
           fi
           cp /tmp/Containerfile.fresh "$C"
           cat "$C"
-          sudo podman build -t "localhost/${{ inputs.recipe }}:candidate" -f "$C" .
+          sudo podman build -t "localhost/${RECIPE}:candidate" -f "$C" .
 
       - name: Check matrix — static, then boot, then update
         id: matrix
         run: |
           sudo chmod 666 /dev/kvm || true
-          .auros-base/matrix/run/run-static.sh "localhost/${{ inputs.recipe }}:candidate"
-          .auros-base/matrix/run/run-boot.sh   "localhost/${{ inputs.recipe }}:candidate"
-          .auros-base/matrix/run/run-update.sh "localhost/${{ inputs.recipe }}:candidate"
+          .auros-base/matrix/run/run-static.sh "localhost/${RECIPE}:candidate"
+          .auros-base/matrix/run/run-boot.sh   "localhost/${RECIPE}:candidate"
+          .auros-base/matrix/run/run-update.sh "localhost/${RECIPE}:candidate"
 
-      - name: Publish — gated, with no bypass
+      - name: Resolve the digest under test
+        id: digest
         run: |
-          # The gate recomputes the verdict from the checks array and ignores any verdict field the
-          # harness wrote. It fails closed. There is deliberately no flag, input or env var that skips it.
-          node .auros-base/../tools/gate.mjs --require-pass results.json || node tools/gate.mjs --require-pass results.json
-          echo "gate passed — publishing"
+          D=$(sudo podman inspect "localhost/${RECIPE}:candidate" --format '{{.Digest}}' 2>/dev/null || true)
+          [ -n "$D" ] || D=$(jq -r '.digest // empty' results.json)
+          [ -n "$D" ] || { echo "::error::cannot resolve a digest for the candidate image. A pass binds to a digest, never to a tag."; exit 1; }
+          echo "digest=$D" >> $GITHUB_OUTPUT
+
+      - name: Publish — gated on the LEDGER, not on our own results file
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          # This step was wrong in an instructive way and tools/gate.test.mjs caught it.
+          #
+          # It used to run `gate.mjs --require-pass results.json` — gating on a file THIS JOB had just
+          # written. That is self-certification: the same code that decides whether the image passed
+          # also supplies the evidence. matrix/README.md says it directly — "a field that says pass is
+          # exactly what a broken or malicious harness would write" — and this step was reading such a
+          # field from a file it produced seconds earlier.
+          #
+          # The gate's only real question is: does the ATTESTATION LEDGER record a full pass for THIS
+          # EXACT DIGEST? So we fetch the ledger from origin, not from this checkout, because a
+          # checkout is something a workflow can modify before reading it.
+          curl -sfL -o /tmp/passed-digests.tsv \
+            https://raw.githubusercontent.com/aarohkandy/auros/main/attest/passed-digests.tsv \
+            || { echo "::error::could not fetch the attestation ledger. No ledger, no publish — this fails closed on purpose."; exit 1; }
+
+          if ! AUROS_LEDGER=/tmp/passed-digests.tsv node .auros-base/../tools/gate.mjs "$DIGEST" --recipe "$RECIPE"; then
+            cat <<MSG
+          ::error::REFUSING TO PUBLISH. The ledger has no full pass recorded for $DIGEST.
+
+          This is the correct outcome right now, not a bug in this workflow. Recording a pass means
+          writing to attest/passed-digests.tsv in aarohkandy/auros, and a workflow's own GITHUB_TOKEN
+          cannot write to another repository (DECISIONS.md D18, BLOCKED.md B2). Until that credential
+          exists, a recipe image can be BUILT and fully TESTED here but cannot be published.
+
+          Do not work around this by gating on results.json. That is what this step used to do, and
+          it gated the image on evidence the same job produced.
+          MSG
+            exit 1
+          fi
+
+          echo "ledger records a full pass for $DIGEST — publishing"
           echo "${{ github.token }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          sudo podman push "localhost/${{ inputs.recipe }}:candidate" "ghcr.io/aarohkandy/auros-${{ inputs.recipe }}:latest"
+          sudo podman push "localhost/${RECIPE}:candidate" "ghcr.io/aarohkandy/auros-${RECIPE}:latest"
 
       - name: Record the base digest this recipe was built against
         run: |
           printf 'BASE_DIGEST=%s\nBUILT_AT=%s\nRUN_URL=%s\n' \
-            "${{ inputs.base_digest }}" "$(date -u +%FT%TZ)" \
+            "${BASE_DIGEST}" "$(date -u +%FT%TZ)" \
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            > "customers/${{ inputs.recipe }}/base.lock"
+            > "customers/${RECIPE}/base.lock"
           git config user.name  'auros-ci'
           git config user.email 'ci@auros.invalid'
-          git add "customers/${{ inputs.recipe }}/base.lock" "customers/${{ inputs.recipe }}/Containerfile"
-          git diff --cached --quiet || git commit -m "ci(${{ inputs.recipe }}): built against ${{ inputs.base_digest }}"
+          git add "customers/${RECIPE}/base.lock" "customers/${RECIPE}/Containerfile"
+          git diff --cached --quiet || git commit -m "ci(${RECIPE}): built against ${BASE_DIGEST}"
           git push || echo "push failed — the poll will retry, so this is not fatal"
 
       - uses: actions/upload-artifact@v4

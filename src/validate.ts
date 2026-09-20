@@ -30,6 +30,7 @@ import { parse as parseYaml } from 'yaml';
 import { compileSchema, reservedByName, schemaRefusals, type CompiledSchema } from './schema.ts';
 import { loadCatalogue, type Catalogue } from './catalogue.ts';
 import { planPrune, type PrunePlan } from './prune.ts';
+import { kioskCandidates } from './compile.ts';
 import { desktopSettings, type Recipe } from './recipe.ts';
 import { nearest, pointer, refuse, sentenceList, type Refusal } from './refusal.ts';
 
@@ -451,8 +452,40 @@ function pruneRefusals(recipe: Recipe, out: Refusal[]): void {
   }
 }
 
-function kioskRefusals(recipe: Recipe, out: Refusal[]): void {
+function kioskRefusals(recipe: Recipe, catalogue: Catalogue, out: Refusal[]): void {
   if (recipe.policy !== 'kiosk' || !recipe.kiosk) return;
+
+  // A kiosk opens exactly one window and there is no field saying which application it is. When a
+  // recipe names more than one the compiler used to take whichever came first in the list, so
+  // alphabetising the apps list silently changed what forty machines in six buildings opened. A
+  // build that silently picks a winner is a build that has quietly changed what the customer asked
+  // for -- the same sentence as the install-and-remove contradiction, and the same answer.
+  const openable = kioskCandidates(recipe, catalogue);
+  if (openable.length > 1) {
+    out.push(
+      refuse(
+        'apps',
+        `This kiosk names ${openable.length} applications the machine could open ` +
+          `(${sentenceList(openable.map((a) => a.name))}), and nothing here says which one it opens.`,
+        'A kiosk is one window showing one page. There is deliberately no field for choosing between ' +
+          'two of them, so the honest answer is to name one application rather than to let the build ' +
+          'pick. A machine that opens the wrong program still boots, still looks right, and is wrong ' +
+          'in every building it is in.',
+      ),
+    );
+  }
+  if (openable.length === 0) {
+    out.push(
+      refuse(
+        'apps',
+        'This kiosk names no application the machine can open as its one window.',
+        'A kiosk image that boots to a black screen is not a degraded product, it is a brick, and it ' +
+          'would pass every check that only looks at what was removed. Name the application the ' +
+          'machine opens.',
+      ),
+    );
+  }
+
   let host: string;
   try {
     host = new URL(recipe.kiosk.opens).hostname;
@@ -612,7 +645,7 @@ export function validateDocument(tool: Toolchain, doc: unknown, recipePath: stri
   keyboardRefusals(recipe, tool.catalogue, refusals);
   appRefusals(recipe, tool.catalogue, refusals);
   pruneRefusals(recipe, refusals);
-  kioskRefusals(recipe, refusals);
+  kioskRefusals(recipe, tool.catalogue, refusals);
   crossFileRefusals(recipe, recipePath, tool.repoRoot, refusals, notes);
 
   // A field the machine ignores is a lie in a file whose claim is that it IS the machine. The theme

@@ -75,6 +75,24 @@ export function token(what: string, value: string): string {
   return value;
 }
 
+/**
+ * A fixed total order over the Windows-programs evidence rows.
+ *
+ * Every field is part of the key, so two rows can only compare equal when they are the same row.
+ * A partial key (app alone) would leave the order of two entries for one program up to whoever
+ * wrote the file, which is the determinism hole this exists to close.
+ */
+type Tested = NonNullable<NonNullable<Recipe['windows_apps']>['tested']>;
+export function sortTested(rows: Tested): Tested {
+  return [...rows].sort(
+    (a, b) =>
+      a.app.localeCompare(b.app) ||
+      a.date.localeCompare(b.date) ||
+      a.result.localeCompare(b.result) ||
+      (a.note ?? '').localeCompare(b.note ?? ''),
+  );
+}
+
 /** Human text, on its way into the image as data rather than as an instruction. */
 function b64(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64');
@@ -231,7 +249,14 @@ export function compile(options: CompileOptions): string {
     helpdesk: recipe.organisation.helpdesk,
     first_boot_message: recipe.first_boot_message ?? null,
     policy: recipe.policy,
-    windows_apps: recipe.windows_apps ?? { enabled: false },
+    // The tested list is SORTED before it is emitted, like every other list this file writes.
+    // canonicalJson sorts object KEYS; it does not touch array order, so without this a customer who
+    // reorders two rows of their own test evidence produces a different Containerfile for the same
+    // fleet, and "same recipe in, same image out" quietly stops being true. explain already sorts the
+    // same list for display, which is how the two came to disagree.
+    windows_apps: recipe.windows_apps
+      ? { ...recipe.windows_apps, ...(recipe.windows_apps.tested ? { tested: sortTested(recipe.windows_apps.tested) } : {}) }
+      : { enabled: false },
     theme: recipe.theme ?? {},
     machines: recipe.hardware.machines,
     approved_by: recipe.approved_by,
@@ -471,6 +496,19 @@ function xkbConf(layouts: string, toggle: string | undefined): string {
 }
 
 /**
+ * Every application on a kiosk recipe that this compiler could start as the one window, in a fixed
+ * order. Exported because validate.ts refuses ambiguity using the same list, and two copies of
+ * "which apps count" is how the validator and the compiler come to disagree about a fleet.
+ */
+export function kioskCandidates(recipe: Recipe, catalogue: Catalogue): Array<{ name: string; ref: string }> {
+  return recipe.apps
+    .map((name) => catalogue.apps.get(name))
+    .filter((app): app is NonNullable<typeof app> => app !== undefined && app.kind === 'flatpak')
+    .map((app) => ({ name: app.name, ref: app.ref }))
+    .sort((a, b) => a.ref.localeCompare(b.ref) || a.name.localeCompare(b.name));
+}
+
+/**
  * The one application a kiosk machine runs.
  *
  * The URL does end up on a command line, because it is a browser argument and there is nowhere else
@@ -482,7 +520,12 @@ function xkbConf(layouts: string, toggle: string | undefined): string {
  */
 function kioskConf(recipe: Recipe, catalogue: Catalogue): string {
   const kiosk = recipe.kiosk!;
-  const browser = recipe.apps.map((name) => catalogue.apps.get(name)).find((app) => app?.kind === 'flatpak');
+  // Sorted, not "the first one in the list". Selecting by the order a person happened to type their
+  // apps in meant that alphabetising the apps list changed which program the kiosks in six buildings
+  // actually opened, with no diff anywhere a reviewer would look, and it made the Containerfile
+  // depend on an ordering the rest of this compiler deliberately throws away.
+  const candidates = kioskCandidates(recipe, catalogue);
+  const browser = candidates[0];
   if (!browser) {
     throw new Error(
       `customers/${recipe.name}: a kiosk needs an application to run, and none of this recipe's apps is ` +
@@ -491,7 +534,19 @@ function kioskConf(recipe: Recipe, catalogue: Catalogue): string {
         'was removed.',
     );
   }
+  if (candidates.length > 1) {
+    // Defence in depth: validate.ts refuses this first, with a sentence. Reaching here means a
+    // caller skipped validation, and the rule that the compiler never picks a winner on its own
+    // still holds -- see appRefusals, which says exactly that about installing and removing.
+    throw new Error(
+      `customers/${recipe.name}: this kiosk names ${candidates.length} applications the machine could ` +
+        `open (${candidates.map((a) => a.name).join(', ')}) and there is no field saying which one it ` +
+        'opens. The compiler will not choose for you: a kiosk that opens a different program from the ' +
+        'one the customer had in mind boots, looks right, and is wrong in forty buildings.',
+    );
+  }
   const url = token('the kiosk address', kiosk.opens);
+  const exec = `flatpak run ${token('a Flatpak application id', browser.ref)} --kiosk ${url}`;
   return [
     '# /etc/auros/kiosk.conf -- generated by auros-recipe compile. Do not edit in the image.',
     `# One window, ${kiosk.allowed_sites.length} permitted hosts, session wiped after ${kiosk.forget_session_after_minutes} minutes.`,
@@ -499,7 +554,7 @@ function kioskConf(recipe: Recipe, catalogue: Catalogue): string {
     '# THE ALLOW-LIST IS NOT A SECURITY BOUNDARY. It bounds which hostnames this window may reach. It',
     '# does not bound what a person can do once they are on one of them: a large third-party site',
     '# brings outbound links, embedded frames and viewers with it. Do not sell this as containment.',
-    `KIOSK_EXEC="flatpak run ${token('a Flatpak application id', browser.ref)} --kiosk ${url}"`,
+    `KIOSK_EXEC="${exec}"`,
     `KIOSK_ALLOWED_SITES="${[...kiosk.allowed_sites].sort().map((h) => token('an allowed host', h)).join(' ')}"`,
     `KIOSK_FORGET_AFTER_MINUTES=${kiosk.forget_session_after_minutes}`,
     `KIOSK_PRINTING=${kiosk.printing ? 'yes' : 'no'}`,

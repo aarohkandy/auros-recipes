@@ -83,8 +83,9 @@ export function explain(options: ExplainOptions): string {
   out.push('');
   out.push(
     para(
-      `That is the whole list. ${recipe.apps.length} application${recipe.apps.length === 1 ? '' : 's'} is what will be on the machine, not ` +
-        `${recipe.apps.length} plus whatever came with it.` +
+      (recipe.apps.length === 1
+        ? 'That is the whole list. One application is what will be on the machine, not one application and three hundred other things.'
+        : `That is the whole list. ${recipe.apps.length} applications is what will be on the machine, not ${recipe.apps.length} plus whatever came with it.`) +
         (fonts.length
           ? ` The fonts ${recipe.language} needs (${sentenceList([...fonts])}) come with the language; you did not have to ask for them and could not have got them wrong.`
           : ''),
@@ -248,7 +249,7 @@ export function explain(options: ExplainOptions): string {
   out.push('');
   out.push(para('Said here, in the order itself, rather than discovered in month two.'));
   out.push('');
-  for (const line of WILL_NOT_DO) {
+  for (const line of willNotDo(recipe)) {
     out.push(`  - ${line.split('\n')[0]!}`);
     for (const rest of line.split('\n').slice(1)) out.push(wrap(rest, '    '));
   }
@@ -281,13 +282,28 @@ export function explain(options: ExplainOptions): string {
     );
     out.push('');
   }
+  // DECISIONS.md D30/D31. This paragraph used to say "fork this repository and rebuild this exact
+  // operating system", which is a licence grant we have not made -- everything here is proprietary
+  // and all rights are reserved. Printing it in the pull request body a customer signs off on would
+  // be exactly the unevidenced claim prohibition 4.4 forbids, in the one document they actually read.
+  // What replaced it is narrower and true: the file is readable, the rules are readable, the image is
+  // theirs, and if we cease operating the build files for THEIR image are handed over.
   out.push(
     para(
-      'This file is public, and so is every rule that decides whether it is acceptable. If we ' +
-        'disappear tomorrow, you fork this repository and rebuild this exact operating system with ' +
-        'tools you already have. That is not a courtesy; it is the thing that makes the rest of this ' +
-        'trustworthy, and it is only true because nothing above is decided by a program we keep to ' +
-        'ourselves.',
+      'This file is readable, and so is every rule that decides whether it is acceptable. Nothing ' +
+        'above is decided by a program we keep to ourselves, so you can check our working rather ' +
+        'than take our word for it. The machines are yours and they keep booting whatever happens ' +
+        'to us; what would stop is the nightly rebuild that keeps them patched, and if we ever cease ' +
+        'operating you are given the build files for your own image so that you or anybody you hire ' +
+        'can carry on patching it.',
+    ),
+  );
+  out.push('');
+  out.push(
+    para(
+      'To be exact about what that is and is not: it is the recipe, the base Containerfile and the ' +
+        'build scripts for these machines. It is not a licence to our tooling, and it is not ' +
+        'permission to redistribute it. This repository is readable; it is not open source.',
     ),
   );
   out.push('');
@@ -313,7 +329,27 @@ const POLICY_PROSE: Record<Recipe['policy'], string> = {
     'whoever used it.',
 };
 
-const WILL_NOT_DO: ReadonlyArray<string> = [
+/**
+ * The same six disclosures for everybody, with the rollout one sized to this fleet.
+ *
+ * A 40-kiosk customer reading an example about "the other 175" learns that this page was written
+ * for somebody else, which is the moment a disclosure stops being read.
+ */
+function willNotDo(recipe: Recipe): ReadonlyArray<string> {
+  const first = Math.min(5, Math.max(1, Math.floor(recipe.hardware.machines / 8)));
+  const rest = recipe.hardware.machines - first;
+  const rollout =
+    recipe.hardware.machines === 1
+      ? 'Roll out to some machines before others.\nThere is only one machine on this order, so this changes nothing today. It is listed ' +
+        'because it changes everything on the day you have thirty.'
+      : 'Roll out to some machines before others.\n' +
+        `Every machine in this fleet takes the same image. There is no way to say "these ${first} go ` +
+        `first and the other ${rest} follow next week", and that is a real gap rather than an ` +
+        'oversight -- see below.';
+  return [...WILL_NOT_DO_FIXED.slice(0, 3), rollout, ...WILL_NOT_DO_FIXED.slice(3)];
+}
+
+const WILL_NOT_DO_FIXED: ReadonlyArray<string> = [
   'Move your Windows programs across.\n' +
     'Programs do not migrate. Files, browser bookmarks and history, printers and account names do. ' +
     'Office and Adobe specifically do not, and we put them on this list rather than in a footnote.',
@@ -324,10 +360,6 @@ const WILL_NOT_DO: ReadonlyArray<string> = [
   'Touch a machine\'s system disk before your files are copied off it and verified.\n' +
     'There is a moment where your data exists in two places and the original disk is untouched. Any ' +
     'mismatch in the file count or a single hash aborts and changes nothing.',
-  'Roll out to some machines before others.\n' +
-    'Every machine in this fleet takes the same image. There is no way to say "these five staff-room ' +
-    'laptops go first and the other 175 follow next week", and that is a real gap rather than an ' +
-    'oversight -- see below.',
   'Hold a package back, pin a version, or stay on an older image.\n' +
     'If a new version breaks something for you, that is a report we want and a fix for everybody. It ' +
     'is never a line in your file that quietly keeps you behind.',

@@ -364,6 +364,17 @@ PLAN=/usr/share/auros/prune-plan.json
 REPORT=/usr/share/auros/removal-report.json
 test -r "$PLAN"
 
+# ASSUMPTION, CHECKED RATHER THAN ASSUMED: python3 is present on this base. It is, on a Fedora KDE
+# image, and this script uses it only to read and write JSON. If a future base drops it, this fails
+# here with a sentence instead of failing later with an empty report, which is the difference
+# between a build that stops and a customer who receives an image whose report says nothing.
+command -v python3 >/dev/null 2>&1 || {
+    printf 'auros-prune: this image has no python3, which this script uses to read the removal plan\n' >&2
+    printf 'auros-prune: and write removal-report.json. Refusing to prune without being able to report\n' >&2
+    printf 'auros-prune: what was pruned: the report ships with the image and a customer reads it.\n' >&2
+    exit 1
+}
+
 mapfile -t WANTED < <(python3 - "$PLAN" <<'PY'
 import json, sys
 plan = json.load(open(sys.argv[1]))

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "The recipe toolchain: validate a recipe.yaml, compile it to a Containerfile, explain it in English.",
-  "license": "Apache-2.0",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=22.18.0"
   },
