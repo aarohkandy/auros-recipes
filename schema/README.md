@@ -365,7 +365,10 @@ them.
 
 - Every property needs a `description` written for a person, not a parser. If you cannot explain a field
   to a school IT coordinator in two sentences, the field is wrong, not the coordinator.
-- `additionalProperties: false` on every object, always. A new object without it is a hole.
+- `additionalProperties: false` on every object that declares a shape, always. A new one without it is
+  a hole. The `if` blocks of cross-field rules are the exception and must NOT have it: an `if` is a
+  question asked about a document, not a declaration of what a document may contain, and closing it
+  would stop the rule ever matching. Those blocks carry their sentence on the rule instead.
 - Adding a refusal is cheap. Removing one needs an entry in `DECISIONS.md` naming who decided and why.
 - Before you add a field, ask what would make it go red. A field nothing checks is decoration, and
   decoration in this file is worse than absence, because the next reader will believe it.

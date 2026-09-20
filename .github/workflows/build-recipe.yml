@@ -48,13 +48,32 @@ jobs:
           sudo docker system prune -af --volumes >/dev/null 2>&1 || true
           df -h /
 
-      - name: Compile and build
+      - name: Compile, and refuse to proceed if the committed Containerfile has drifted
         id: build
         run: |
           R="customers/${{ inputs.recipe }}/recipe.yaml"
-          node dist/cli.js compile "$R" > Containerfile.generated
-          cat Containerfile.generated
-          sudo podman build -t "localhost/${{ inputs.recipe }}:candidate" -f Containerfile.generated .
+          C="customers/${{ inputs.recipe }}/Containerfile"
+          node dist/cli.js compile "$R" > /tmp/Containerfile.fresh
+
+          # D28. The Containerfile is COMMITTED next to the recipe, because the FAQ tells a customer
+          # they can rebuild their own operating system with nothing but podman:
+          #     git clone .../auros-recipes && podman build -f <name>/Containerfile .
+          # That command backs the claim we advertise hardest — if we vanish, you rebuild without us —
+          # so it has to actually work, with no Node and no toolchain of ours.
+          #
+          # A generated file committed to a repo drifts. So CI regenerates it and fails on any
+          # difference: a committed artefact that no longer matches its source is a worse lie than no
+          # artefact at all. The diff is also genuinely useful to the customer — reading their own
+          # Containerfile across two commits is a plain record of what changed on their machines.
+          if [ -f "$C" ] && ! diff -u "$C" /tmp/Containerfile.fresh > /tmp/drift.diff; then
+            echo "::error::$C has drifted from $R — the committed Containerfile no longer matches the recipe it claims to come from."
+            echo "The customer-facing rebuild command uses the COMMITTED file, so a drifted one hands them a different operating system than the one we built."
+            cat /tmp/drift.diff
+            exit 1
+          fi
+          cp /tmp/Containerfile.fresh "$C"
+          cat "$C"
+          sudo podman build -t "localhost/${{ inputs.recipe }}:candidate" -f "$C" .
 
       - name: Check matrix — static, then boot, then update
         id: matrix
@@ -81,7 +100,7 @@ jobs:
             > "customers/${{ inputs.recipe }}/base.lock"
           git config user.name  'auros-ci'
           git config user.email 'ci@auros.invalid'
-          git add "customers/${{ inputs.recipe }}/base.lock"
+          git add "customers/${{ inputs.recipe }}/base.lock" "customers/${{ inputs.recipe }}/Containerfile"
           git diff --cached --quiet || git commit -m "ci(${{ inputs.recipe }}): built against ${{ inputs.base_digest }}"
           git push || echo "push failed — the poll will retry, so this is not fatal"
 
@@ -92,5 +111,5 @@ jobs:
           path: |
             results.json
             removal-report.json
-            Containerfile.generated
+            customers/${{ inputs.recipe }}/Containerfile
           if-no-files-found: warn
