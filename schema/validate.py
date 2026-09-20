@@ -169,6 +169,21 @@ def validate(path, validator):
         print("  FAIL  a recipe is a block of named settings, not a list or a bare value")
         return False
 
+    # How `schema:` was WRITTEN, not what it parsed to. 1.0, 0x1 and +1 all load as 1, and
+    # Draft 2020-12 counts 1.0 as an integer, so `const: 1` accepts them. The discriminator is the
+    # one field that must be exact, so it is checked on source text -- the TypeScript validator does
+    # the same (src/recipe.ts, nonCanonicalSchemaLiteral), which keeps the two giving one answer.
+    literal_problem = None
+    try:
+        root = yaml.compose(path.read_text(encoding="utf-8"))
+        for key, value in (root.value if isinstance(root, yaml.MappingNode) else []):
+            if getattr(key, "value", None) == "schema" and isinstance(value, yaml.ScalarNode):
+                if value.value != "1" or value.style not in (None, ""):
+                    literal_problem = (f"schema: the form version is written as '{value.value}'. "
+                                       "Write it as the plain number 1.")
+    except yaml.YAMLError:
+        pass
+
     idx = index_sentences(validator.schema)
     errors = sorted(validator.iter_errors(doc), key=where)
 
@@ -193,6 +208,8 @@ def validate(path, validator):
             if not (e.validator == "enum" and tuple(e.absolute_path) in authored_paths)]
 
     problems = [f"{where(e)}: {explain(e, validator.schema, idx)}" for e in kept]
+    if literal_problem:
+        problems.insert(0, literal_problem)
     check_cross_file(doc, path, problems)
 
     if not problems:

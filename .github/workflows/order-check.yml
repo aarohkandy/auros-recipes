@@ -1,0 +1,139 @@
+# THE TEST BUILD ON AN ORDER BRANCH — and the callback that lets the card be settled.
+#
+# ── WHY THIS FILE EXISTS ────────────────────────────────────────────────────────────────────────
+#
+# Two holes met here.
+#
+# 1. An order from the website is a branch `order/<name>-<date>-<hash>` pushed by our GitHub App, and
+#    a push authored by a GitHub App DOES start workflow runs. propagate.yml had no branches filter,
+#    so it fired on that branch, called build-recipe.yml, and the publish step had no ref guard: a
+#    stranger's unreviewed pull request built and pushed an image into our namespace. Both are now
+#    fixed at the source — propagate.yml is `branches: [main]` and publishing requires main. But an
+#    order branch SHOULD still be built, because the whole ordering of this product depends on it:
+#    "nothing is charged until the test build passes". It just must not publish.
+#
+# 2. `/build-result` — the Worker endpoint that ends the Stripe trial on a pass and releases the
+#    authorisation on a fail — had no producer. Nothing anywhere signed or POSTed to it, so every
+#    order would have sat at `awaiting-checkout` forever while the order page told the customer the
+#    card is "billed only when the test build passes". The endpoint itself is correct (forged calls
+#    fail the signature, replays fall outside the 300s window, retries are idempotent by run id); it
+#    simply had nobody to talk to.
+#
+# So: build the order branch, run the full matrix, publish NOTHING, and report the outcome to the
+# Worker with `if: always()` — a failed build must release the authorisation just as reliably as a
+# passing one bills it. A build that crashes and says nothing leaves a customer's card authorised
+# for a machine that was never made.
+#
+# WHAT THIS RUN CAN DO: read the repository, build an image locally, boot it in a VM, and POST one
+# signed result. It has no packages: write and it never calls podman push — build-recipe.yml owns
+# publishing and refuses anything that is not main.
+name: order-check
+
+on:
+  push:
+    branches: ['order/**']
+  workflow_dispatch:
+    inputs:
+      recipe: { required: true, type: string, description: 'The recipe folder to test-build. Publishes nothing, ever.' }
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+# Read only. This job handles a file written by somebody on the internet; the strongest statement
+# about what it can do with what it reads is a token that cannot write anything.
+permissions:
+  contents: read
+
+jobs:
+  which:
+    runs-on: ubuntu-24.04
+    outputs:
+      recipe: ${{ steps.pick.outputs.recipe }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
+      - name: Which recipe did this push touch?
+        id: pick
+        env:
+          DISPATCHED: ${{ inputs.recipe }}
+        run: |
+          # Derived from the FILES, not parsed out of the branch name. A branch is
+          # order/<name>-<date>-<hash> and a recipe name may contain hyphens, so splitting the branch
+          # is guesswork; the changed path is not.
+          if [ -n "${DISPATCHED}" ]; then
+            NAME="${DISPATCHED}"
+          else
+            NAME=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null \
+              | sed -n 's#^customers/\([^/]*\)/recipe\.yaml$#\1#p' | head -n1 || true)
+          fi
+          # Re-check the shape here even though the schema constrains it. This value becomes a path
+          # and a branch of this job's control flow, and a publish step should never be the first
+          # place a name is checked.
+          if ! printf '%s' "$NAME" | grep -Eq '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'; then
+            echo "::error::this push touches no customers/<name>/recipe.yaml, or the name is not one the schema allows. Nothing to test-build."
+            exit 1
+          fi
+          [ -f "customers/${NAME}/recipe.yaml" ] || { echo "::error::customers/${NAME}/recipe.yaml does not exist on this branch."; exit 1; }
+          echo "recipe=${NAME}" >> $GITHUB_OUTPUT
+          echo "test-building customers/${NAME}/recipe.yaml — this run publishes nothing"
+
+  build:
+    needs: which
+    # `publish: false` is the caller stating its intent. It is not what actually stops the push:
+    # build-recipe.yml's publish step also requires `github.ref == 'refs/heads/main'`, and in a
+    # reusable workflow that is the CALLER's ref — this one, `refs/heads/order/...`. A caller cannot
+    # assert its way past it, which is the point of having the second guard.
+    uses: ./.github/workflows/build-recipe.yml
+    with:
+      recipe: ${{ needs.which.outputs.recipe }}
+      base_digest: ''
+      publish: false
+    secrets: inherit
+
+  report:
+    needs: [which, build]
+    # ALWAYS. A failed build must release the customer's authorisation exactly as reliably as a
+    # passing one bills it, and a cancelled or crashed run that says nothing leaves a card authorised
+    # for a machine nobody is making.
+    if: always() && needs.which.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros-web, path: .auros-web }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Tell the Worker, signed with the code it verifies with
+        env:
+          BUILD_RESULT_SECRET: ${{ secrets.BUILD_RESULT_SECRET }}
+          SITE_ORIGIN: ${{ vars.SITE_ORIGIN || 'https://auros.dev' }}
+          RECIPE: ${{ needs.which.outputs.recipe }}
+          OUTCOME: ${{ needs.build.result == 'success' && 'pass' || 'fail' }}
+        run: |
+          if [ -z "${BUILD_RESULT_SECRET}" ]; then
+            echo "::error::BUILD_RESULT_SECRET is not set on this repository, so this build cannot be reported and the order cannot settle. The card stays authorised and uncharged, which is the safe direction, but a person has to settle it by hand."
+            exit 1
+          fi
+
+          # The body is written to a file and that file is what gets signed AND what gets sent. The
+          # Worker verifies the signature against the raw bytes it receives, before JSON.parse, so
+          # signing a re-serialised copy would sign a different document than the one posted.
+          jq -nc \
+            --arg recipe "${RECIPE}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg run_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --arg outcome "${OUTCOME}" \
+            '{recipe:$recipe, run_id:$run_id, run_url:$run_url, outcome:$outcome}' > body.json
+
+          SIG=$(node .auros-web/worker/tools/sign-build-result.mjs body.json)
+
+          # --fail-with-body, not --fail: a refusal from this endpoint is written to be read, and
+          # swallowing it would turn "there is no order recorded for this recipe" into exit code 22.
+          curl -sS --fail-with-body \
+            -X POST "${SITE_ORIGIN}/build-result" \
+            -H 'content-type: application/json' \
+            -H "x-auros-signature: ${SIG}" \
+            --data-binary @body.json
+          echo
+          echo "reported ${OUTCOME} for ${RECIPE}"

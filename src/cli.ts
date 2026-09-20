@@ -17,7 +17,7 @@ import { relative, resolve } from 'node:path';
 import { loadConfig } from './config.ts';
 import { compile, resolveBaseDigest } from './compile.ts';
 import { explain } from './explain.ts';
-import { loadRecipe, repoRoot } from './recipe.ts';
+import { loadRecipe, nonCanonicalSchemaLiteral, repoRoot } from './recipe.ts';
 import { formatRefusals } from './refusal.ts';
 import { loadToolchain, validateDocument, type Toolchain, type ValidationResult } from './validate.ts';
 
@@ -42,9 +42,61 @@ function fail(message: string): never {
   process.exit(2);
 }
 
+/**
+ * Validate one file, and return a VERDICT even when it does not parse.
+ *
+ * Unreadable YAML is a fact about the recipe, not about this toolchain, so it exits 1 like every
+ * other refusal. It used to propagate out of loadRecipe and land in main()'s catch, which calls
+ * fail() and exits 2 -- so a stranger's duplicate map key was indistinguishable, to any CI step that
+ * branches on the exit code, from "our catalogue is broken". That points the operator triaging a red
+ * build at the toolchain instead of at the file. Exit 2 is reserved for failures that are genuinely
+ * ours: a missing schema, an unreadable catalogue, a missing auros.config.json. The file not being
+ * there at all is also ours in that sense -- CI named a path that does not exist -- so it still
+ * exits 2, and that is the one case separated out here by errno.
+ */
 function runValidate(tool: Toolchain, path: string): ValidationResult {
-  const loaded = loadRecipe(path);
-  return validateDocument(tool, loaded.doc, loaded.path);
+  let loaded;
+  try {
+    loaded = loadRecipe(path);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'EACCES' || code === 'EISDIR') throw err;
+    return {
+      ok: false,
+      notes: [],
+      refusals: [
+        {
+          where: '(top level)',
+          what: (() => {
+            const detail = (err as Error).message.replace(/^[\s\S]*? is not valid YAML\.\n?/, '').trim();
+            return `This file is not valid YAML.${detail ? `\n${detail}` : ''}`;
+          })(),
+          why:
+            'A recipe is read before it is judged, so a file YAML cannot parse is refused here ' +
+            'rather than reported as a broken toolchain. Duplicate keys, a second document after ' +
+            '`---`, and unbalanced quotes all land here. This is a verdict about the file: exit 1.',
+        },
+      ],
+    };
+  }
+  const result = validateDocument(tool, loaded.doc, loaded.path);
+  const literal = nonCanonicalSchemaLiteral(loaded.text);
+  if (literal === null) return result;
+  return {
+    ok: false,
+    notes: result.notes,
+    refusals: [
+      {
+        where: 'schema',
+        what: `The form version is written as '${literal}'. Write it as the plain number 1.`,
+        why:
+          'This field decides how every other line in the file is read, so it must say exactly one ' +
+          'thing. 1.0, 0x1, +1 and "1" all mean 1 to a YAML parser and would mean nothing in ' +
+          'particular to a person reading the file the day a second version of this form exists.',
+      },
+      ...result.refusals,
+    ],
+  };
 }
 
 function report(path: string, root: string, result: ValidationResult): void {
@@ -137,7 +189,7 @@ function main(argv: string[]): number {
     }
   })();
 
-  const baseDigest = resolveBaseDigest(resolve(path));
+  const baseDigest = resolveBaseDigest();
 
   if (verb === 'explain') {
     process.stdout.write(

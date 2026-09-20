@@ -1,15 +1,52 @@
 # Build ONE customer recipe. Called by propagate.yml, once per stale recipe.
 # Publishes only on a full check-matrix pass — there is no input that bypasses that.
+#
+# ── PUBLISHING IS MAIN-ONLY, AND THAT IS AN AUTHORISATION GATE ──────────────────────────────────
+#
+# An order from the website becomes a branch `order/<name>-<date>-<hash>` pushed by our GitHub App,
+# and a push authored by a GitHub App DOES start workflow runs — only a workflow's own GITHUB_TOKEN
+# is suppressed. So for a while this file was reachable from a stranger's order: propagate.yml had
+# no branches filter, fired on the order branch, found customers/<new>/ with no lockfile, called
+# this workflow, and the publish step had no ref guard at all. A pull request opened by somebody on
+# the internet, with no human review and no merge, built and pushed
+# ghcr.io/aarohkandy/auros-<name>:latest into our namespace.
+#
+# The check matrix did not stop it and was never going to: it is a QUALITY gate, it answers "does
+# this image work", and the question being asked was "may this image carry our name". The promise
+# repeated in the pull request body, in the configurator panel and on the order page — nothing is
+# built until you and we have both read it — was false on the first order.
+#
+# Two guards now, because they fail differently:
+#   * `inputs.publish`, so a caller states its intent and a test-build caller cannot forget to;
+#   * `github.ref == 'refs/heads/main'`, which a caller cannot state at all. In a reusable workflow
+#     `github.ref` is the CALLER's ref, so this is the fact about where the code came from rather
+#     than a parameter anybody can pass.
+#
+# An order branch is test-built by order-check.yml, which runs the same matrix and stops before the
+# push. Review and merge to main is the thing that publishes.
 name: build-recipe
 on:
   workflow_call:
     inputs:
       recipe:       { required: true,  type: string }
       base_digest:  { required: true,  type: string }
+      publish:
+        required: false
+        type: boolean
+        default: true
+        description: >-
+          Whether this build may publish. False is the safe direction and callers that test-build an
+          unreviewed branch must pass it. It is not sufficient on its own: the publish step also
+          requires the caller to be on main, which no input can assert.
   workflow_dispatch:
     inputs:
       recipe:       { required: true,  type: string }
       base_digest:  { required: false, type: string, description: 'Leave empty to use the currently published base. There is deliberately no input that skips the check matrix.' }
+      publish:
+        required: false
+        type: boolean
+        default: true
+        description: 'Publishing also requires this dispatch to be on main. There is still no input that skips the check matrix.'
 
 defaults:
   run:
@@ -35,8 +72,16 @@ jobs:
       #
       # The schema constrains the name as well. This is the second layer, because the first one being
       # correct is not something a publish step should have to assume.
-      RECIPE: ${RECIPE}
-      BASE_DIGEST: ${BASE_DIGEST}
+      #
+      # THE SYNTAX MATTERS AND WAS WRONG HERE. GitHub interpolates `${{ }}` and nothing else, so
+      # `RECIPE: ${RECIPE}` set this variable to the nine literal characters `${RECIPE}`. Every step
+      # then expanded `$RECIPE` back to that literal, computed customers/${RECIPE}/recipe.yaml, and
+      # died on a path that cannot exist -- before validating, compiling or gating anything. The job
+      # failed closed, which is why nothing unsafe shipped, but "the validator runs on every build"
+      # was false for as long as it was written this way. tools/workflow-lint.mjs now refuses a `${NAME}`
+      # in any workflow `env:` value that carries no `${{`.
+      RECIPE: ${{ inputs.recipe }}
+      BASE_DIGEST: ${{ inputs.base_digest }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -57,9 +102,23 @@ jobs:
           echo "::group::validate"
           node dist/cli.js validate "$R"
           echo "::endgroup::"
+          # The recipe arrives from the internet and `explain` prints its text at column zero, so a
+          # display_name of "::error::Everything passed" was emitted verbatim into the build log and
+          # read by Actions as a workflow command: fabricated annotations, ::add-mask:: redacting
+          # chosen strings from the operator's log, ::stop-commands:: hiding the real output that
+          # follows -- including this gate's. On a product whose argument is that the build output is
+          # true, letting the customer write the build output is the wrong bug to have.
+          #
+          # recipe.schema.json refuses a leading `::` in $defs/line and $defs/prose, so all three
+          # validators already do. This is the second layer, because the first one being correct is
+          # not something a log should have to assume: everything between the tokens is text, whatever
+          # it says. The token is a fresh uuid per run, so nothing in the recipe can spell the resume.
+          RESUME="auros-$(uuidgen)"
+          echo "::stop-commands::${RESUME}"
           echo "::group::explain (this text becomes the PR body and the customer reads it)"
           node dist/cli.js explain "$R" | tee /tmp/explain.txt
           echo "::endgroup::"
+          echo "::${RESUME}::"
 
       - name: Reclaim disk
         run: |
@@ -110,7 +169,11 @@ jobs:
           [ -n "$D" ] || { echo "::error::cannot resolve a digest for the candidate image. A pass binds to a digest, never to a tag."; exit 1; }
           echo "digest=$D" >> $GITHUB_OUTPUT
 
+      # THE REF GUARD IS PART OF THE GATE, not a convenience. See the header of this file for what
+      # reached this step before it existed. `inputs.publish` is the caller's stated intent;
+      # `github.ref` is where the code came from, and a caller cannot assert it.
       - name: Publish — gated on the LEDGER, not on our own results file
+        if: inputs.publish && github.ref == 'refs/heads/main'
         env:
           DIGEST: ${{ steps.digest.outputs.digest }}
         run: |
@@ -145,6 +208,20 @@ jobs:
           # the log read like an infrastructure error rather than like a refusal.
           # tools/gate.refusals.test.mjs now resolves every gate.mjs path in every workflow and fails
           # if one of them names a file that will not be there.
+          # NEGATIVE CONTROL FIRST. The gate must be demonstrated to REFUSE before its allow means
+          # anything. For as long as this step called a gate.mjs path that did not exist, the job
+          # failed with MODULE_NOT_FOUND and the log read like infrastructure — the gate had never
+          # once run here and nothing said so. An all-zeros digest can never have a recorded pass,
+          # so the gate must exit exactly 1 on it: 0 means it approves everything, 2 means it cannot
+          # decide, and "not found" means it is not there. Same control as auros-base build.yml.
+          SENTINEL="sha256:$(printf '0%.0s' $(seq 64))"
+          set +e; node .auros-meta/tools/gate.mjs "$SENTINEL" --recipe "$RECIPE" >/dev/null 2>&1; grc=$?; set -e
+          if [ "$grc" -ne 1 ]; then
+            echo "::error::negative control failed: the gate exited ${grc} on a digest that can never have passed (expected 1). A gate that cannot refuse has not approved anything."
+            exit 1
+          fi
+          echo "negative control: the gate refuses a digest with no recorded pass (exit 1), so its verdict below means something"
+
           if ! node .auros-meta/tools/gate.mjs "$DIGEST" --recipe "$RECIPE"; then
             cat <<MSG
           ::error::REFUSING TO PUBLISH. The ledger has no full pass recorded for $DIGEST.
@@ -161,18 +238,56 @@ jobs:
           fi
 
           echo "ledger records a full pass for $DIGEST — publishing"
-          echo "${{ github.token }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          sudo podman push "localhost/${RECIPE}:candidate" "ghcr.io/aarohkandy/auros-${RECIPE}:latest"
 
+          # The image name is DERIVED, never written here. auros.config.json is the single source of
+          # truth for the namespace (D1); a literal on this line would mean renaming the company is a
+          # grep across five repositories. `--arg` keeps the recipe name data rather than jq program
+          # text, the same reason it is bound to $RECIPE above.
+          IMAGE=$(jq -r --arg r "$RECIPE" '"\(.registry)/\(.org)/\(.product)-\($r)"' .auros-meta/auros.config.json)
+          REGISTRY=$(jq -r .registry .auros-meta/auros.config.json)
+          echo "${{ github.token }}" | sudo podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+          # PUBLISH THE DIGEST THE GATE CLEARED, not "whatever is under that local tag now".
+          # `podman push <tag> <dest>` re-uploads the bytes the tag points at, and the thing the
+          # ledger cleared is a digest. They are the same today and there is no step between them
+          # that could make them differ -- but "there is no step between them" is a property of this
+          # file that a later edit silently removes, so it is asserted instead of assumed.
+          sudo podman push --digestfile /tmp/pushed.digest "localhost/${RECIPE}:candidate" "docker://${IMAGE}:latest"
+          PUSHED=$(cat /tmp/pushed.digest)
+          if [ "$PUSHED" != "$DIGEST" ]; then
+            echo "::error::published $PUSHED but the ledger cleared $DIGEST. The bytes that reached the registry are not the bytes that were tested."
+            exit 1
+          fi
+          echo "published ${IMAGE}:latest at $PUSHED — the digest the ledger cleared"
+
+      # THE LOCKFILE LIVES OUTSIDE customers/, AND THAT IS A SECURITY BOUNDARY, NOT TIDINESS.
+      #
+      # It used to be customers/<name>/base.lock -- the inside of a pull request from a stranger.
+      # Two lines added beside recipe.yaml did two things at once: compile.ts read the digest from it
+      # and pinned that fleet's FROM to an image of the author's choosing, and the staleness test in
+      # propagate.yml (`grep -qF "$DIGEST" "$lock"`) saw the currently published digest in the file
+      # and marked the fleet permanently up to date. Never rebuilt, never patched, still booting.
+      # That is the abandoned machine this product exists to replace, manufactured by us.
+      #
+      # .locks/ is written only here. .github/workflows/pull-request.yml refuses any pull request
+      # that touches it, and src/validate.ts refuses any file in a recipe folder that is not the
+      # recipe, its Containerfile, removal-floor.lock or the logo the recipe names.
+      # Same guard, and for a related reason rather than the same one. The lockfile is what
+      # propagate.yml reads to decide a recipe is current, so writing one from an unreviewed branch
+      # would mark that fleet up to date against a build nobody published — permanently not-stale,
+      # never rebuilt, never patched. It is also a commit and a push, and a build triggered by a
+      # stranger's order does not get to write to the repository.
       - name: Record the base digest this recipe was built against
+        if: inputs.publish && github.ref == 'refs/heads/main'
         run: |
+          mkdir -p .locks
           printf 'BASE_DIGEST=%s\nBUILT_AT=%s\nRUN_URL=%s\n' \
             "${BASE_DIGEST}" "$(date -u +%FT%TZ)" \
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            > "customers/${RECIPE}/base.lock"
+            > ".locks/${RECIPE}.lock"
           git config user.name  'auros-ci'
           git config user.email 'ci@auros.invalid'
-          git add "customers/${RECIPE}/base.lock" "customers/${RECIPE}/Containerfile"
+          git add ".locks/${RECIPE}.lock" "customers/${RECIPE}/Containerfile"
           git diff --cached --quiet || git commit -m "ci(${RECIPE}): built against ${BASE_DIGEST}"
           git push || echo "push failed — the poll will retry, so this is not fatal"
 

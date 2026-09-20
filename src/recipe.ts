@@ -9,7 +9,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, parseDocument, isScalar } from 'yaml';
 
 export type Policy = 'open' | 'managed' | 'locked' | 'kiosk';
 
@@ -125,4 +125,26 @@ export function repoRoot(): string {
     if (parent === dir) throw new Error('cannot locate the repository root (looked for schema/recipe.schema.json and catalogue/apps.tsv above this file)');
     dir = parent;
   }
+}
+
+/**
+ * How the `schema:` discriminator was WRITTEN, not what it parsed to.
+ *
+ * `schema: 1.0`, `schema: 0x1`, `schema: +1` and `schema: 1e0` all parse to the number 1, so the
+ * schema's `const: 1` accepts every one of them -- in Ajv because 1.0 === 1, and in Python's
+ * jsonschema because Draft 2020-12 counts a number with no fractional part as an integer. That is
+ * harmless today and wrong in the one field that must be exact: the day schema 2 ships, "1.0" is
+ * exactly the spelling somebody will argue meant something. The rule is about source text, so it is
+ * checked on source text, by both validators (schema/validate.py does the same with yaml.compose).
+ *
+ * Returns the literal when it is present and is not exactly `1`, otherwise null.
+ */
+export function nonCanonicalSchemaLiteral(text: string): string | null {
+  let doc;
+  try { doc = parseDocument(text); } catch { return null; }
+  const node = doc.get('schema', true);
+  if (!isScalar(node)) return null;
+  const source = (node as { source?: unknown }).source;
+  if (typeof source !== 'string') return null;
+  return source === '1' && node.type === 'PLAIN' ? null : source;
 }

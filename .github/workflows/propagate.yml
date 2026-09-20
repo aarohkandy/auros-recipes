@@ -22,7 +22,20 @@ on:
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
+  # `branches: [main]` IS A SECURITY BOUNDARY, not tidiness.
+  #
+  # An order from the website is a branch `order/<name>-<date>-<hash>` pushed into this repository by
+  # our GitHub App, and a push authored by a GitHub App starts workflow runs -- only a workflow's own
+  # GITHUB_TOKEN is suppressed. Without this filter, that push matched `paths: customers/**`, detect
+  # found the new folder with no lockfile and called it stale, and rebuild called build-recipe.yml on
+  # the order branch. A stranger's unreviewed pull request built and published an image into our
+  # namespace, and the only thing between an anonymous POST and ghcr.io/aarohkandy/auros-<name>:latest
+  # was the check matrix -- which is a quality gate, not an authorisation gate.
+  #
+  # Order branches are test-built by order-check.yml, which runs the same matrix and stops before the
+  # push. Propagation is about what is merged.
   push:
+    branches: [main]
     paths: ['customers/**', 'schema/**', 'src/**']
 
 defaults:
@@ -62,7 +75,10 @@ jobs:
           for d in customers/*/; do
             [ -d "$d" ] || continue
             name=$(basename "$d")
-            lock="$d/base.lock"
+            lock=".locks/$name.lock"
+            # .locks/ is written only by build-recipe.yml and is refused in a pull request, so a
+            # stranger cannot declare their own fleet up to date and stop receiving CVE rebuilds.
+            # It used to be customers/<name>/base.lock, inside the diff the stranger controls.
             if [ ! -f "$lock" ]; then STALE+=("$name"); continue; fi
             if ! grep -qF "$DIGEST" "$lock"; then STALE+=("$name"); fi
           done

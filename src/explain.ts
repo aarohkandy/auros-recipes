@@ -308,7 +308,7 @@ export function explain(options: ExplainOptions): string {
   // theirs, and if we cease operating the build files for THEIR image are handed over.
   out.push(
     para(
-      'This file is public. If we disappear tomorrow, you fork this repository and rebuild this exact operating system with tools you already have. ' +
+      'This file is readable, and so is every rule that decides whether it is acceptable. Nothing ' +
         'above is decided by a program we keep to ourselves, so you can check our working rather ' +
         'than take our word for it. The machines are yours and they keep booting whatever happens ' +
         'to us; what would stop is the nightly rebuild that keeps them patched, and if we ever cease ' +

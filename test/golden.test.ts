@@ -14,16 +14,20 @@
  *      forty-seven thousand bytes of build instructions now say that they did not say before, which
  *      is the only way an unintended change gets noticed rather than approved.
  *
- * The second half of the file is the round trip: every committed recipe validates, compiles, and its
- * Containerfile's FROM resolves to the digest in base.lock when there is one. No recipe has been
- * built yet, so there is no base.lock -- which is exactly the state in which a "the FROM matches the
- * lock" test passes for the wrong reason forever. So the tests below assert what is true today AND
- * build a lockfile in a temporary fleet to prove the same code goes red when the two disagree.
+ * The second half is the round trip: every committed recipe validates, compiles, and its
+ * Containerfile's FROM resolves to the digest the build was given. No recipe has been built yet, so
+ * no digest exists -- which is exactly the state in which "the FROM matches the pin" passes for the
+ * wrong reason forever. Each of those tests therefore has its mirror image beside it: one asserts the
+ * unpinned state we are in, one drives the pinned path through a temporary fleet, and one plants
+ * every lockfile an author might reach for inside customers/ and asserts that not one of them moves
+ * a single byte of the output. That last one is a rule about a threat rather than about a format --
+ * customers/ is the inside of a pull request from a stranger.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compile, resolveBaseDigest } from '../src/compile.ts';
 import { baseReference, loadConfig } from '../src/config.ts';
@@ -33,6 +37,9 @@ import { ROOT, toolchain, type Doc } from './helpers.ts';
 
 const config = loadConfig(ROOT);
 const CUSTOMERS = join(ROOT, 'customers');
+
+/** A literal string, safe to drop into a RegExp. */
+const escaped = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Every fleet actually committed, read off disk rather than listed here, so a new one is covered. */
 function fleets(): string[] {
@@ -50,7 +57,7 @@ function compileFleet(name: string): { text: string; digest: string | undefined;
     `customers/${name}/recipe.yaml is committed and does not validate:\n` +
       result.refusals.map((r) => `  ${r.where}: ${r.what}`).join('\n'),
   );
-  const digest = resolveBaseDigest(path, {});
+  const digest = resolveBaseDigest({});
   return {
     text: compile({
       recipe: result.recipe!,
@@ -65,6 +72,46 @@ function compileFleet(name: string): { text: string; digest: string | undefined;
     digest,
     notes: result.notes,
   };
+}
+
+/**
+ * The same thing for a fixture that lives OUTSIDE customers/.
+ *
+ * Fixtures must not be created under customers/, even temporarily. `node --test` runs these files in
+ * parallel and cli.test.ts spawns `validate --all`, which lists that directory -- so a fixture there
+ * appears in another test's run and fails it, intermittently, with an error about a recipe nobody
+ * wrote. Nothing in these fixtures needs to be there: the only cross-file rule that cares is the one
+ * checking a recipe's name against its folder, which is satisfied by naming the temporary folder.
+ */
+function compileAt(recipePath: string, env: NodeJS.ProcessEnv = {}): string {
+  const loaded = loadRecipe(recipePath);
+  const result = validateDocument(toolchain(), loaded.doc, loaded.path);
+  assert.ok(
+    result.ok,
+    `${recipePath} does not validate:\n` + result.refusals.map((r) => `  ${r.where}: ${r.what}`).join('\n'),
+  );
+  return compile({
+    recipe: result.recipe!,
+    recipePath,
+    plan: result.plan!,
+    fonts: result.fonts ?? [],
+    config,
+    catalogue: toolchain().catalogue,
+    baseDigest: resolveBaseDigest(env),
+    notes: result.notes,
+  });
+}
+
+/** A fixture folder named after the recipe it holds, outside customers/. */
+function fixture(name: string): { dir: string; recipePath: string; cleanup: () => void } {
+  const root = mkdtempSync(join(tmpdir(), 'auros-golden-'));
+  const dir = join(root, name);
+  mkdirSync(dir, { recursive: true });
+  const source = loadRecipe(join(CUSTOMERS, 'example-workstation', 'recipe.yaml')).doc as Doc;
+  source['name'] = name;
+  const recipePath = join(dir, 'recipe.yaml');
+  writeFileSync(recipePath, JSON.stringify(source));
+  return { dir, recipePath, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 /** The first line that differs, quoted, because a 47,000-byte diff is not a test failure message. */
@@ -158,61 +205,118 @@ test('every committed recipe validates, compiles, and names the base from the na
   }
 });
 
-test('with no base.lock the FROM carries the tag, and the file SAYS that is why', () => {
-  // This is the state today: nothing has been built, so no digest exists. The disclosure matters
-  // more than the tag does -- an unpinned build that looked pinned is how a rebuild silently moves.
+test('with no digest supplied the FROM carries the tag, and the file SAYS that is why', () => {
+  // The state today: nothing has been built, so no digest exists. The disclosure matters more than
+  // the tag does -- an unpinned build that LOOKED pinned is how a rebuild silently stops moving.
   for (const name of fleets()) {
-    const lock = join(CUSTOMERS, name, 'base.lock');
-    assert.ok(!existsSync(lock), `customers/${name}/base.lock now exists, so this test is asserting the wrong state`);
     const text = readFileSync(join(CUSTOMERS, name, 'Containerfile'), 'utf8');
-    assert.match(text, new RegExp(`^ARG BASE=${config.baseImage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:${config.baseTag}$`, 'm'));
-    assert.match(text, /base pinned by\s+tag only -- this recipe has never been built/);
+    assert.match(text, new RegExp(`^ARG BASE=${escaped(config.baseImage)}:${config.baseTag}$`, 'm'));
+    assert.match(text, /base pinned by\s+tag only -- no digest was supplied to the compiler/);
+    assert.doesNotMatch(text, /base pinned by\s+\$AUROS_BASE_DIGEST/);
   }
 });
 
-test('when a base.lock exists the FROM resolves to exactly that digest', () => {
-  // Built in a temporary fleet rather than asserted about the committed ones, because the committed
-  // ones have no lockfile and a test that only ever sees the unpinned case would pass forever
-  // whatever the pinning code did. This is the same check going the other way, which is the only
-  // reason the one above means anything.
-  const dir = join(CUSTOMERS, 'golden-lock-fixture');
-  const digest = `sha256:${'7'.repeat(64)}`;
-  mkdirSync(dir, { recursive: true });
+test('nothing inside a customer directory can pin the base, whatever it is called', () => {
+  // The one that matters most in this file, and it is a rule about a THREAT rather than about a
+  // format. A recipe's own directory is the inside of a pull request from a stranger. A lockfile
+  // there used to pin the build, so two lines beside recipe.yaml chose the image for a fleet --
+  // under a generated header claiming the digest had been "published when this build started",
+  // which nothing had published and nothing had checked. Worse, propagation decides a recipe is up
+  // to date by finding the published digest in its lockfile, so a file naming today's digest made
+  // that fleet permanently not-stale: never rebuilt, never patched, still booting. That is the
+  // abandoned machine this product exists to replace, produced by us.
+  //
+  // It is closed twice over, and both halves are asserted because either alone would rot: the digest
+  // comes from the environment and from nowhere else, AND a recipe folder holding a file nobody named
+  // is refused rather than ignored. Ignoring it alone would be silent about an author plainly trying.
+  const f = fixture('golden-lock-fixture');
+  const attacker = `sha256:${'7'.repeat(64)}`;
   try {
-    const source = loadRecipe(join(CUSTOMERS, 'example-workstation', 'recipe.yaml')).doc as Doc;
-    source['name'] = 'golden-lock-fixture';
-    writeFileSync(join(dir, 'recipe.yaml'), JSON.stringify(source));
-    writeFileSync(join(dir, 'base.lock'), `BASE_DIGEST=${digest}\n`);
+    const clean = compileAt(f.recipePath);
+    assert.ok(!clean.includes(attacker));
 
-    const resolved = resolveBaseDigest(join(dir, 'recipe.yaml'), {});
-    assert.equal(resolved, digest, 'the lockfile beside the recipe was not read at all');
+    for (const filename of ['base.lock', 'base.lock.json', 'BASE.lock', '.base.lock', 'digest', 'pin.txt', 'Containerfile.extra']) {
+      writeFileSync(join(f.dir, filename), `BASE_DIGEST=${attacker}\n`);
+      try {
+        // Half one: the resolver does not read the recipe's directory at all.
+        assert.equal(resolveBaseDigest({}), undefined, `a file called ${filename} beside the recipe pinned the build`);
 
-    const { text } = compileFleet('golden-lock-fixture');
-    assert.match(text, new RegExp(`^ARG BASE=${config.baseImage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}@${digest}$`, 'm'));
-    assert.match(text, /base pinned by\s+the digest published when this build started/);
-    assert.ok(!text.includes(`:${config.baseTag}\n`), 'the tag is still in the FROM alongside the digest');
-
-    // And the digest has to be a digest. A lockfile holding a tag, or a truncated hash, must not
-    // produce a build that looks pinned and is not.
-    for (const bad of ['BASE_DIGEST=stable\n', 'BASE_DIGEST=sha256:abc\n', 'BASE_DIGEST=sha1:' + '0'.repeat(40) + '\n', '']) {
-      writeFileSync(join(dir, 'base.lock'), bad);
-      assert.equal(
-        resolveBaseDigest(join(dir, 'recipe.yaml'), {}),
-        undefined,
-        `a lockfile reading ${JSON.stringify(bad)} was accepted as a pin`,
-      );
+        // Half two: the file is refused by name, so nobody finds out by it working.
+        const result = validateDocument(toolchain(), loadRecipe(f.recipePath).doc, f.recipePath);
+        assert.equal(result.ok, false, `${filename} was ignored rather than refused`);
+        assert.match(
+          result.refusals.map((r) => `${r.where} ${r.what}`).join('\n'),
+          new RegExp(`${escaped(filename)} is not a file a recipe folder may contain`),
+          `${filename} was refused, but not with a sentence naming it`,
+        );
+      } finally {
+        rmSync(join(f.dir, filename), { force: true });
+      }
     }
+
+    // And with every planted file gone the fleet is acceptable again, so the rule is about the file
+    // rather than about the fixture having been broken all along.
+    assert.equal(compileAt(f.recipePath), clean);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    f.cleanup();
   }
 });
 
-test('the environment can pin a build, and only with a real digest', () => {
-  const path = join(CUSTOMERS, 'example-school', 'recipe.yaml');
+test('the files a recipe folder IS allowed to hold are still allowed, so the rule above is not "refuse everything"', () => {
+  const f = fixture('golden-allowed-fixture');
+  try {
+    writeFileSync(join(f.dir, 'Containerfile'), compileAt(f.recipePath));
+    writeFileSync(join(f.dir, 'removal-floor.lock'), 'MUST_REMOVE_AT_LEAST=1\n');
+    const result = validateDocument(toolchain(), loadRecipe(f.recipePath).doc, f.recipePath);
+    assert.ok(
+      result.ok,
+      'a folder holding only the files it is supposed to was refused:\n' +
+        result.refusals.map((r) => `  ${r.where}: ${r.what}`).join('\n'),
+    );
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('when the environment supplies a digest the FROM resolves to exactly it, and the header stops saying "tag only"', () => {
+  // The other direction, and the only reason the two tests above mean anything: a compiler that had
+  // simply lost the ability to pin would pass both of them and pin nothing, forever.
+  const digest = `sha256:${'c'.repeat(64)}`;
+  const f = fixture('golden-pin-fixture');
+  try {
+    const text = compileAt(f.recipePath, { AUROS_BASE_DIGEST: digest });
+    assert.match(text, new RegExp(`^ARG BASE=${escaped(config.baseImage)}@${digest}$`, 'm'));
+    assert.match(text, /base pinned by\s+\$AUROS_BASE_DIGEST, resolved from the registry by the caller/);
+    assert.doesNotMatch(text, new RegExp(`^ARG BASE=.*:${config.baseTag}$`, 'm'), 'the tag is in the FROM alongside the digest');
+    assert.equal(text.split('\n').filter((l) => l.startsWith('ARG BASE=')).length, 1);
+
+    // ...and the unpinned build of the very same recipe says the opposite, in words.
+    const unpinned = compileAt(f.recipePath, {});
+    assert.match(unpinned, /base pinned by\s+tag only -- no digest was supplied to the compiler/);
+    assert.ok(!unpinned.includes(digest));
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('only a real digest pins a build, so a pin that is not one falls back to the tag rather than looking pinned', () => {
   const good = `sha256:${'b'.repeat(64)}`;
-  assert.equal(resolveBaseDigest(path, { AUROS_BASE_DIGEST: good }), good);
-  for (const bad of ['stable', 'sha256:xyz', `sha256:${'b'.repeat(63)}`, `SHA256:${'b'.repeat(64)}`, `sha256:${'B'.repeat(64)}`]) {
-    assert.equal(resolveBaseDigest(path, { AUROS_BASE_DIGEST: bad }), undefined, `'${bad}' was accepted as a digest`);
+  assert.equal(resolveBaseDigest({ AUROS_BASE_DIGEST: good }), good);
+  for (const bad of [
+    'stable',
+    'sha256:xyz',
+    `sha256:${'b'.repeat(63)}`,
+    `sha256:${'b'.repeat(65)}`,
+    `SHA256:${'b'.repeat(64)}`,
+    `sha256:${'B'.repeat(64)}`,
+    `sha1:${'b'.repeat(40)}`,
+    ` sha256:${'b'.repeat(64)}`,
+    `sha256:${'b'.repeat(64)} `,
+    `sha256:${'b'.repeat(64)}\nAUROS_BASE_DIGEST=sha256:${'a'.repeat(64)}`,
+    'ghcr.io/somebody/else@sha256:' + 'b'.repeat(64),
+    '',
+  ]) {
+    assert.equal(resolveBaseDigest({ AUROS_BASE_DIGEST: bad }), undefined, `${JSON.stringify(bad)} was accepted as a digest`);
   }
 });
 

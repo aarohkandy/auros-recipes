@@ -1,0 +1,290 @@
+{
+  "$comment": "The reserved key families, as DATA rather than as code.\n\nA recipe is refused for a key like `postInstall` or `kernelArgs` not because the schema lists every spelling anybody might try -- it cannot -- but because the key belongs to a FAMILY of things this format will never carry, and the family has one paragraph explaining why. That rule used to live only inside src/validate.ts, which meant the Worker behind the website could bless a recipe that CI then refused: the site telling a visitor 'this is the same validator CI runs' while running a subset of it. docs/CONFIGURATOR.md forbids exactly that drift.\n\nSo the families live here, next to recipe.schema.json, and both validators READ this file:\n  * auros-recipes/src/validate.ts loads it from the repository root\n  * auros-web/worker/schema/reserved-families.json is a vendored byte-identical copy, kept current by auros-web/schema/sync.mjs --check and asserted by worker/test/schema-provenance.test.js\n\n`exact` is matched against the key with every non-alphanumeric character removed and the result lowercased, so `kernel_args`, `kernelArgs` and `KERNEL-ARGS` are one entry. `contains` is a substring of that same normalised form, and is only ever applied to keys the schema does not already know.",
+  "families": [
+    {
+      "id": "base",
+      "title": "A recipe cannot name what it is built on",
+      "why": "The FROM line is written by the compiler from auros.config.json, the one file that holds the namespace, and nothing in a recipe can influence it. Every fleet sits on the same foundation, and that is the only reason a security fix is one rebuild instead of a spreadsheet. A digest is refused for the same reason and it is the one worth sitting with: pinning an organisation to one exact image freezes them off the rebuild that carries the next security fix, which turns the machine we sold them into the abandoned machine we sold them a way out of. If a fleet genuinely needs a different base, that is a conversation with a person and possibly a customer we decline. It is never an edit to this file.",
+      "exact": [
+        "from",
+        "base",
+        "image",
+        "registry",
+        "digest",
+        "containerfile",
+        "dockerfile",
+        "parent",
+        "upstream",
+        "tag",
+        "manifest"
+      ],
+      "contains": [
+        "baseimage",
+        "fromimage",
+        "imageref",
+        "ociref",
+        "inheritfrom",
+        "basedigest",
+        "imagedigest",
+        "basetag",
+        "imagetag",
+        "rebase"
+      ]
+    },
+    {
+      "id": "kernel",
+      "title": "A recipe cannot choose a kernel, a driver or a boot argument",
+      "why": "The kernel, its modules, out-of-tree drivers and the boot command line belong to the base image, where one team patches them once for everybody. A per-recipe kernel is a fork wearing a smaller hat: the moment one organisation is on a different kernel, a security fix stops being one rebuild and becomes a spreadsheet. If what you want is a quieter or noisier boot, ask for that as a change to the base, where it becomes one audited setting for every fleet.",
+      "exact": [
+        "kernel",
+        "kargs",
+        "cmdline",
+        "modules",
+        "dkms",
+        "drivers",
+        "firmware",
+        "grub",
+        "initramfs",
+        "microcode"
+      ],
+      "contains": [
+        "kernelarg",
+        "kernelver",
+        "kernelpin",
+        "bootarg",
+        "kernelcmdline",
+        "kernelparam",
+        "moduleblacklist",
+        "initrd"
+      ]
+    },
+    {
+      "id": "pins",
+      "title": "Nothing can be held at a version",
+      "why": "There is no pin, no hold, no exclude and no minimum version, and the applications list has no shape that could carry one: an application name contains no digits at all, and every way of writing a version number needs one. That is the difference between a rule and a shape. A rule can be argued with at four in the afternoon on a deadline; a shape cannot. Holding a package back is how a machine ends up unpatched while still appearing maintained, which is the exact failure this product exists to fix. If a new version broke your fleet, that is a report we want and a fix in the base for everybody, not a line in one organisation's file that quietly keeps them behind.",
+      "exact": [
+        "pin",
+        "pins",
+        "hold",
+        "holds",
+        "holdback",
+        "version",
+        "versions",
+        "exclude",
+        "excludes",
+        "freeze",
+        "lock",
+        "locks",
+        "constraint",
+        "constraints"
+      ],
+      "contains": [
+        "pinned",
+        "pinning",
+        "versionlock",
+        "lockversion",
+        "minversion",
+        "maxversion",
+        "exactversion",
+        "packageversion",
+        "holdpackage",
+        "nover",
+        "downgrade"
+      ]
+    },
+    {
+      "id": "scripts",
+      "title": "A recipe cannot run code",
+      "why": "There is no script, no hook, no command and no environment variable. Every effect a recipe can have is a field with a name and a description, readable by somebody who does not write software. A shell line is the opposite of everything this file is for: unreadable to the person it is written for, unauditable in a pull request, and unbounded in what it can do inside a build that holds the key we sign images with. Orders arrive here as pull requests from strangers, and a format where a stranger can send us a command is a format we cannot accept. If the effect you need is not a field here, that is a conversation, not a command.",
+      "exact": [
+        "run",
+        "script",
+        "scripts",
+        "hooks",
+        "hook",
+        "env",
+        "cmd",
+        "entrypoint",
+        "exec",
+        "shell",
+        "command",
+        "commands"
+      ],
+      "contains": [
+        "postinstall",
+        "preinstall",
+        "firstbootscript",
+        "onboot",
+        "runscript",
+        "shellcmd",
+        "systemdexec",
+        "execstart",
+        "environment",
+        "bashline"
+      ]
+    },
+    {
+      "id": "repos",
+      "title": "A recipe cannot add a software source",
+      "why": "A new package source is a new set of people who can put code on these laptops, added by somebody filling in a form. The applications a recipe can name come from the catalogue inside the base image and from Flathub, both of which are reviewed once for everybody. Turning off a signature check is refused for the same reason and more strongly: it is the difference between installing what we published and installing whatever answered.",
+      "exact": [
+        "repo",
+        "repos",
+        "repositories",
+        "copr",
+        "ppa",
+        "sources",
+        "mirror",
+        "mirrors",
+        "nogpgcheck",
+        "insecure",
+        "gpgcheck"
+      ],
+      "contains": [
+        "extrarepo",
+        "addrepo",
+        "customrepo",
+        "thirdparty",
+        "packagesource",
+        "yumrepo",
+        "dnfrepo",
+        "flathubremote",
+        "remoteadd"
+      ]
+    },
+    {
+      "id": "files",
+      "title": "A recipe cannot drop arbitrary files into the image",
+      "why": "A file overlay is a script with extra steps: a unit file, a polkit rule or a sudoers drop-in placed by a recipe can undo every policy the image enforces, and nothing in a pull request would make that visible to a reviewer reading a list of application names. The things a recipe legitimately needs to place -- a logo, a first-boot sentence, a helpdesk number -- have their own named fields, and the compiler writes them as data rather than as instructions.",
+      "exact": [
+        "files",
+        "file",
+        "overlay",
+        "overlays",
+        "patch",
+        "patches",
+        "config",
+        "configs",
+        "ostree",
+        "copy",
+        "add"
+      ],
+      "contains": [
+        "systemdunit",
+        "unitfile",
+        "dropin",
+        "rpmostree",
+        "etcfiles",
+        "writefile",
+        "filecontent",
+        "sysctl",
+        "polkitrule",
+        "sudoers"
+      ]
+    },
+    {
+      "id": "gates",
+      "title": "There is no way to ask for less testing",
+      "why": "An unsigned or untested image can never reach a customer, and the strongest way to write that rule is a file that cannot express the request. Tests may only be added: look at the shape of hardware.also_test -- there is no also_skip and no exclude. A flag that skips a check is a flag somebody uses at the end of a long day, once, for a good reason, and then the check is advisory forever.",
+      "exact": [
+        "skip",
+        "force",
+        "unsigned",
+        "signature",
+        "signing",
+        "bypass",
+        "override",
+        "overrides"
+      ],
+      "contains": [
+        "skipcheck",
+        "skiptest",
+        "notest",
+        "nocheck",
+        "publishwithout",
+        "allowuntested",
+        "allowunsigned",
+        "nosign",
+        "ignorefailure",
+        "alsoskip",
+        "disablecheck"
+      ]
+    },
+    {
+      "id": "secrets",
+      "title": "No credential of any kind belongs in this file",
+      "why": "This repository is public by design -- it is how a customer keeps their exact operating system if we vanish -- so anything written here is published to the world, immediately and irrevocably. A wireless key in a git history is a wireless key in a git history forever. This is also a real gap rather than a complete answer: your laptops do need one wireless network and one printer on day one, and the intended answer is a sealed enrolment bundle handed over separately and referenced by approved_by.enrolment. That is designed and not built. See schema/README.md section 4.",
+      "exact": [
+        "password",
+        "passphrase",
+        "secret",
+        "secrets",
+        "token",
+        "tokens",
+        "psk",
+        "credentials",
+        "credential",
+        "key",
+        "keys"
+      ],
+      "contains": [
+        "apikey",
+        "wifipassword",
+        "wifikey",
+        "licencekey",
+        "licensekey",
+        "privatekey",
+        "sshkey",
+        "authtoken",
+        "clientsecret",
+        "accesskey"
+      ]
+    },
+    {
+      "id": "rollback",
+      "title": "The safety net is not optional",
+      "why": "greenboot is the thing that checks the machine reached a login screen after an update and puts the old image back if it did not. The fleet this product is built for is a nonprofit or a school with one overworked IT person, no out-of-band console and nobody who can be walked through a recovery. Switching off automatic updates or rollback converts a bad night into a person physically visiting a hundred and eighty laptops with a USB stick. updates.install_between moves the window; nothing closes it.",
+      "exact": [
+        "rollback",
+        "greenboot",
+        "deployments",
+        "deployment"
+      ],
+      "contains": [
+        "autoupdate",
+        "disableupdate",
+        "noupdate",
+        "updatesoff",
+        "pauseupdate",
+        "stopupdate",
+        "nogreenboot",
+        "norollback",
+        "staged",
+        "rollout"
+      ]
+    },
+    {
+      "id": "claims",
+      "title": "A recipe cannot make a general claim",
+      "why": "The website renders what is in these files, so a claim that cannot be written here cannot appear there. There is no field for a compatibility percentage, a savings figure, a device count or a testimonial, and that is prohibition 4.4 enforced by the format rather than by somebody remembering it. What you CAN write is evidence: under windows_apps.tested, a named program, the day a person ran it, and one of four results.",
+      "exact": [
+        "compatibility",
+        "testimonial",
+        "testimonials",
+        "savings",
+        "casestudy",
+        "references",
+        "logos"
+      ],
+      "contains": [
+        "customercount",
+        "devicecount",
+        "savingsfigure",
+        "successrate",
+        "compatpercent",
+        "casestudies",
+        "quotes"
+      ]
+    }
+  ]
+}

@@ -7,7 +7,7 @@
 #
 #   recipe            example-school
 #   base image        ghcr.io/aarohkandy/auros-base:hardened
-#   base pinned by    tag only -- this recipe has never been built, so no digest was available
+#   base pinned by    tag only -- no digest was supplied to the compiler, so none is claimed here
 #   namespace from    auros.config.json (the one file that holds it)
 #   SOURCE_DATE_EPOCH 1789689600 (midnight UTC on 2026-09-18, the recipe's approval date)
 #   architecture      x86_64

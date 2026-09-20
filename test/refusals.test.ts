@@ -1073,3 +1073,57 @@ test('a refusal never leaks raw validator noise where a sentence was available',
   assert.equal(result.ok, false);
   assert.doesNotMatch(said(result), /must NOT be valid|should NOT be valid/i);
 });
+
+test('no refusal in the whole table prints a regular expression at a person', () => {
+  // The most common refusal this toolchain produces is a pattern failure -- every version pin, every
+  // homoglyph, every path traversal in a name arrives there -- and ajv's message for one IS the
+  // pattern: `must match pattern "^[A-Za-z][A-Za-z+#]*(?: [A-Za-z][A-Za-z+#]*)*$"`. That was being
+  // printed verbatim to a school IT coordinator in about ninety of the cases below.
+  //
+  // It is not a correctness bug and it is worth a test anyway: README.md promises that every refusal
+  // says WHY refusing is the feature, and a reader who cannot read the refusal works around it. Every
+  // one of these fields already explains its shape in words; the sentence is right there.
+  const offenders: string[] = [];
+  for (const entry of MUST_REFUSE) {
+    const text = said(check(entry.doc));
+    for (const noise of [
+      /must match pattern/i,
+      /\^\[A-Za-z/,                     // a character class from a real pattern in this schema
+      /\(\?:/,                          // a non-capturing group: nothing a person writes
+      /\\u[0-9a-f]{4}/i,                 // an escaped code point
+      /#\/\$defs/,                      // a schema pointer
+      /instancePath|schemaPath|additionalProperty\b/,
+      /\[object Object\]|\bundefined\b/,
+    ]) {
+      if (noise.test(text)) {
+        offenders.push(`${entry.label}\n      ${text.split('\n').find((l) => noise.test(l))?.slice(0, 140)}`);
+        break;
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders.slice(0, 8),
+    [],
+    `${offenders.length} refusals print machinery instead of a sentence:\n\n${offenders.slice(0, 8).join('\n')}`,
+  );
+});
+
+test('the refusal for a shape still tells the reader what the shape IS, rather than merely dropping the regex', () => {
+  // The other direction, and the one that makes the test above worth having. Deleting the pattern
+  // from the message would satisfy it and leave a reader with less than they started with.
+  const pinned = check(mutate(S, (d) => { (d['apps'] as string[]).push('firefox-140.0'); }));
+  const text = said(pinned);
+  assert.match(text, /'firefox-140\.0' is not a value this field can hold/);
+  assert.match(text, /the shape of what you can write, not a list of things we decided to block/);
+  assert.match(text, /No digits anywhere/, 'the rule itself is not explained in words anywhere in the refusal');
+});
+
+test('a refusal never echoes a ten-megabyte value back at whoever is reading the log', () => {
+  // A recipe is a pull request from a stranger, and one of the things a stranger can send is a very
+  // long string. A refusal that quoted it whole would be a denial of service against the reviewer.
+  const huge = check(mutate(S, (d) => { d['name'] = 'a'.repeat(5 * 1024 * 1024); }));
+  assert.equal(huge.ok, false);
+  const text = said(huge);
+  assert.ok(text.length < 4000, `the refusal for a 5 MB value is itself ${text.length} characters long`);
+  assert.match(text, /characters\)|more than \d+ characters/, 'the refusal does not say how long the value was');
+});

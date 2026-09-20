@@ -42,13 +42,27 @@ test('validate exits 1 on a refused recipe, and 2 when it cannot read one', () =
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('a file that is not YAML at all fails as a tool error, not as a verdict', () => {
+test('a file that is not YAML at all is a VERDICT about the file, not a broken toolchain', () => {
+  // Exit 1, not 2, and the distinction is the whole point of having two codes. Unreadable YAML is a
+  // fact about a stranger's pull request; exit 2 is reserved for failures that are genuinely ours --
+  // a missing schema, an unreadable catalogue, no auros.config.json -- because that is the code an
+  // operator triaging a red build uses to decide whether to look at the file or at us.
   const dir = mkdtempSync(join(tmpdir(), 'auros-cli-'));
   const bad = join(dir, 'recipe.yaml');
   writeFileSync(bad, 'apps: [unclosed\n  - broken: : :\n');
   const r = run(['validate', bad]);
-  assert.equal(r.status, 2);
-  assert.match(r.stderr, /not valid YAML/);
+  assert.equal(r.status, 1, `${r.stdout}${r.stderr}`);
+  assert.match((r.stdout + r.stderr).replace(/\s+/g, " "), /is not valid YAML/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a duplicate key is a verdict too, and a missing file is still ours', () => {
+  // The two sides of the line above, asserted together so that collapsing them shows up here.
+  const dir = mkdtempSync(join(tmpdir(), 'auros-cli-'));
+  const dup = join(dir, 'recipe.yaml');
+  writeFileSync(dup, 'schema: 1\nname: a\nname: b\n');
+  assert.equal(run(['validate', dup]).status, 1, 'a duplicate key was reported as a broken toolchain');
+  assert.equal(run(['validate', join(dir, 'absent.yaml')]).status, 2, 'a path CI got wrong was reported as a verdict about a recipe');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -147,16 +161,24 @@ test('a missing namespace file is an error in words, not a FROM line reading und
 // -------------------------------------------------------------------------------------------------
 
 function fleetWithLock(lock: string, floor: number): { path: string; doc: Doc; cleanup: () => void } {
-  // A real directory under customers/, because the ratchet reads a file beside the recipe and the
-  // uniqueness check reads its siblings. A fixture that faked either would be testing the fake.
-  const dir = join(ROOT, 'customers', 'ratchet-fixture');
+  // A real directory with a real file beside the recipe, because the ratchet reads that file and a
+  // fixture that faked it would be testing the fake.
+  //
+  // NOT under customers/, though it used to be. `node --test` runs these files in parallel, and
+  // golden.test.ts asserts that customers/ holds exactly the three committed examples while
+  // cli.test.ts runs `validate --all` over the same directory -- so a fixture living there for a few
+  // milliseconds fails a test in another file, intermittently, with an error about a recipe nobody
+  // wrote. The only cross-file rule that needs a real location is the one checking a recipe's name
+  // against its folder, and naming the temporary folder satisfies it.
+  const root = mkdtempSync(join(tmpdir(), 'auros-ratchet-'));
+  const dir = join(root, 'ratchet-fixture');
   mkdirSync(dir, { recursive: true });
   const doc = school();
   doc['name'] = 'ratchet-fixture';
   (doc['prune'] as Doc)['must_remove_at_least'] = floor;
   writeFileSync(join(dir, 'recipe.yaml'), JSON.stringify(doc));
   writeFileSync(join(dir, 'removal-floor.lock'), lock);
-  return { path: join(dir, 'recipe.yaml'), doc, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { path: join(dir, 'recipe.yaml'), doc, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 test('the removal floor may rise freely', () => {

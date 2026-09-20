@@ -1,0 +1,72 @@
+# THE GATE ON THE PATH ORDERS ACTUALLY ARRIVE BY.
+#
+# Spec §6D: "An order opens a pull request." Spec §6B: a recipe that would change the FROM line or
+# pin a version is REJECTED, and that rejection is enforced mechanically. Until this file existed,
+# those two sentences did not meet. auros-recipes was the one repository of the five with no
+# `pull_request` workflow at all: the meta repo's gates.yml runs on pull_request but checks out
+# aarohkandy/auros-recipes at its DEFAULT BRANCH, not at the pull request's head, so a stranger's
+# order-PR — the exact threat model src/compile.ts names in its docblock — was checked by nothing.
+# build-recipe.yml runs only after merge, and only on workflow_call/workflow_dispatch.
+#
+# Everything here runs against the PULL REQUEST'S OWN CONTENTS with no secrets and no write
+# permission, because `pull_request` (not `pull_request_target`) checks out the head of a fork
+# without handing it a token. That is deliberate: this job reads a stranger's file, so it must not
+# be able to do anything with what it reads.
+name: pull-request
+
+on:
+  pull_request:
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros, path: .auros-meta }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # 1. FILES. A recipe folder holds the recipe, its generated Containerfile, the removal-floor
+      #    ledger and the logo the recipe names. .locks/ is written by CI and may never appear in a
+      #    pull request: a lockfile naming the currently published base digest makes propagate.yml
+      #    treat that fleet as up to date forever, which is how a machine stops receiving the CVE
+      #    rebuild while still looking healthy.
+      - name: Files — nothing may appear that something reads
+        run: node scripts/ci-owned-files.mjs "origin/${{ github.base_ref }}"
+
+      # 2. THE RECIPES THEMSELVES. --all rather than "the changed ones": a change to the catalogue
+      #    or to the schema can refuse a recipe nobody touched, and finding that out at merge time
+      #    is finding it out on somebody's fleet.
+      - name: Validate — a recipe may only ADD
+        run: node dist/cli.js validate --all
+
+      # 3. THE RATCHET, which is a property of HISTORY and cannot be seen from the working tree.
+      #    src/validate.ts compares must_remove_at_least against removal-floor.lock in the same
+      #    directory — the same pull request — so the permission to lower it could be granted in the
+      #    diff that used it. This compares against the base branch instead.
+      - name: Removal floor — the ratchet only turns one way
+        run: node scripts/floor-ratchet.mjs "origin/${{ github.base_ref }}"
+
+      # 4. Containerfile drift, the palette of golden files, the refusal table, the parity of the
+      #    two validators. golden.test.ts asserts that every committed Containerfile is exactly what
+      #    the compiler produces, which is the claim the replaceability page makes to a customer.
+      - name: Tests
+        run: |
+          python3 -m pip install --quiet jsonschema pyyaml
+          pnpm test
+
+      - name: Workflow lint
+        run: node .auros-meta/tools/workflow-lint.mjs .

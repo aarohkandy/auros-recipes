@@ -356,7 +356,31 @@ than something we assert.
 Some rules cannot be expressed in a schema and live in the validator: your `name` matching its folder and
 being unique, your models joining to `hardware/compat.tsv`, your application names existing in the
 catalogue inside the base image, and whether the fonts for your language cover your first-boot message.
-Those are listed here so you know the boundary, and the validator is in this repository so you can read
+Four more were added after an audit found the gaps they close:
+
+- **Your recipe folder holds four kinds of file and nothing else**: `recipe.yaml`, the `Containerfile`
+  generated from it, `removal-floor.lock`, and the logo your recipe names. A stray `base.lock` beside a
+  recipe used to pin that fleet to a base image of the author's choosing and then tell the propagation
+  job the fleet was already up to date, so it stopped getting security rebuilds. The digest a build is
+  pinned to now comes only from CI, and the lockfile CI writes lives in `.locks/`, which a pull request
+  may not touch.
+- **Every character of your first-boot message has to be drawable.** Each character must be punctuation
+  every font carries, or belong to a script one of your languages brings fonts for. That includes emoji.
+  A character the validator has no name for is refused by its code point, not ignored. The first version
+  of this rule knew eleven scripts and let everything else through, including Chinese, Korean, Japanese,
+  Armenian, Georgian and Khmer. The rule is in `src/scripts.ts`.
+- **`other_languages` may not repeat your primary `language`.**
+- **`schema:` must be written as the plain number `1`.** `1.0`, `0x1` and `+1` all load as 1, so the
+  schema file alone cannot tell them apart. Both validators check how the field is written.
+
+One rule is about **history rather than about your file**, so neither validator can see it. It runs on
+every pull request as `scripts/floor-ratchet.mjs`. `prune.must_remove_at_least` may rise freely. It may
+fall only if `ALLOW_LOWER_TO` and a `REASON=` line were already on the main branch before your pull
+request, meaning they were merged on their own, earlier. A pull request that lowers the floor and grants
+itself permission in the same diff is refused. This is a separation of steps, not a second person.
+Nothing in code can require a second person.
+
+These are listed here so you know the boundary, and the validator is in this repository so you can read
 them.
 
 ---

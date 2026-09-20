@@ -134,22 +134,29 @@ export function resolveSourceDateEpoch(recipe: Recipe, env: NodeJS.ProcessEnv = 
 }
 
 /**
- * The base digest for THIS build.
+ * The base digest for THIS build, and the only place it may come from.
  *
  * A recipe cannot pin a base -- there is no field for it, and a recipe-level pin would freeze that
- * customer off the rebuild that carries the next security fix. This is the other thing: the digest
- * the base is published at RIGHT NOW, passed in by the propagation workflow, so that one build is
- * reproducible. When the base moves, propagate.yml notices the lockfile is stale and rebuilds
- * against the new digest. The pin lives for one build; the recipe never sees it.
+ * customer off the rebuild that carries the next security fix. The pin for one build is the digest
+ * the base is published at RIGHT NOW, resolved by the caller and handed to this toolchain in
+ * $AUROS_BASE_DIGEST. It lives for one build; the recipe never sees it.
+ *
+ * WHY THIS READS NO FILE. It used to also read `base.lock` from the recipe's own directory. That
+ * directory is the inside of a pull request from a stranger: two lines beside recipe.yaml pinned a
+ * fleet to a digest of the author's choosing, under a generated header that said the digest had been
+ * "published when this build started" -- which nothing had checked and nothing had published. Worse,
+ * propagate.yml decides a recipe is up to date by looking for the published digest in its lockfile,
+ * so a lockfile naming today's digest made that fleet permanently not-stale: never rebuilt, never
+ * patched. That is the abandoned machine this product exists to prevent.
+ *
+ * So the lockfile moved out of customers/ to .locks/<name>.lock, which CI writes and a pull request
+ * may not touch (see scripts/ci-owned-files.mjs and .github/workflows/pull-request.yml), and this
+ * function reads the environment and nothing else. A digest the caller did not supply is not a
+ * digest: the FROM line falls back to the tag and the header says so in those words.
  */
-export function resolveBaseDigest(recipePath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function resolveBaseDigest(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const fromEnv = env['AUROS_BASE_DIGEST'];
   if (fromEnv && /^sha256:[0-9a-f]{64}$/.test(fromEnv)) return fromEnv;
-  const lock = join(dirname(recipePath), 'base.lock');
-  try {
-    const match = /^BASE_DIGEST=(sha256:[0-9a-f]{64})$/m.exec(readFileSync(lock, 'utf8'));
-    if (match?.[1]) return match[1];
-  } catch { /* no lockfile yet: this recipe has never been built */ }
   return undefined;
 }
 
@@ -181,7 +188,7 @@ export function compile(options: CompileOptions): string {
         '',
         `  recipe            ${recipe.name}`,
         `  base image        ${base}`,
-        `  base pinned by    ${options.baseDigest ? 'the digest published when this build started' : 'tag only -- this recipe has never been built, so no digest was available'}`,
+        `  base pinned by    ${options.baseDigest ? '$AUROS_BASE_DIGEST, resolved from the registry by the caller of this compiler' : 'tag only -- no digest was supplied to the compiler, so none is claimed here'}`,
         `  namespace from    ${basename(config.configPath)} (the one file that holds it)`,
         `  SOURCE_DATE_EPOCH ${epoch}${epochGiven ? ' (given to the compiler)' : ` (midnight UTC on ${recipe.approved_by.date}, the recipe's approval date)`}`,
         `  architecture      ${config.arch}`,

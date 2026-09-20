@@ -30,7 +30,14 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
       "minLength": 3,
-      "maxLength": 40
+      "maxLength": 40,
+      "allOf": [
+        {
+          "title": "A fleet cannot be named after a Windows device",
+          "description": "con, prn, aux, nul, com1-com9 and lpt1-lpt9 are reserved device names on Windows, where they cannot be used as a file or folder name at all. This name becomes the folder customers/<name>/ in the recipes repository, and a folder called con cannot be checked out by git on Windows. That breaks every Windows checkout of the repository -- ours, a reviewer's, and yours if the build files are ever handed over to you -- not only the one for the organisation that chose the name, and it presents as repository corruption rather than as a name somebody picked. A hyphen and one more letter fixes it.",
+          "not": { "pattern": "^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$" }
+        }
+      ]
     },
     "for": {
       "description": "A paragraph, in your own words, saying who these machines are for and what people do on them. Written for the person who inherits this file in eighteen months and has never met you. It is the first thing a diff between two organisations shows, and the only part of this file that explains WHY the rest of it looks the way it does. Twenty words minimum, because a blank one is a file nobody can inherit.",
@@ -841,13 +848,27 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
-      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069]+$"
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069]+$",
+      "allOf": [
+        {
+          "title": "Nothing a person writes here may begin with ::",
+          "description": "GitHub Actions reads its own build log for lines beginning `::`, and treats them as commands rather than as output: `::error::` and `::notice::` fabricate annotations, `::add-mask::` redacts a string of the author's choosing from the operator's log, and `::group::` and `::stop-commands::` hide the real output that follows — including the publish gate's. A recipe arrives here as a pull request from a stranger, and its text is printed into that log by `explain`, which is the plain-English account of the machine the customer reads. On a product whose whole argument is that the build output is true, letting the customer write the build output is the wrong thing to allow, so a line may not begin with `::`. Put a word in front of it and it is text again.",
+          "not": { "pattern": "^[ \\t]*::" }
+        }
+      ]
     },
     "prose": {
       "description": "A paragraph a person wrote. Line breaks and tabs are allowed; carriage returns, other control characters and text-direction overrides are not.",
       "type": "string",
       "minLength": 1,
-      "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069]+$"
+      "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069]+$",
+      "allOf": [
+        {
+          "title": "No line of a paragraph may begin with ::",
+          "description": "GitHub Actions reads its own build log for lines beginning `::`, and treats them as commands rather than as output: `::error::` and `::notice::` fabricate annotations, `::add-mask::` redacts a string of the author's choosing from the operator's log, and `::group::` and `::stop-commands::` hide the real output that follows — including the publish gate's. A recipe arrives here as a pull request from a stranger, and its text is printed into that log by `explain`, which is the plain-English account of the machine the customer reads. On a product whose whole argument is that the build output is true, letting the customer write the build output is the wrong thing to allow, so a line may not begin with `::`. Put a word in front of it and it is text again. A paragraph is checked line by line, because the log reads it line by line.",
+          "not": { "pattern": "(?:^|\\n)[ \\t]*::" }
+        }
+      ]
     },
     "date": {
       "description": "A calendar day, written YYYY-MM-DD.",
