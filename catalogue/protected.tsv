@@ -1,0 +1,41 @@
+# The protected set — the machine-readable rendering of schema/PROTECTED.md.
+#
+# schema/PROTECTED.md is the authority. This file is what src/prune.ts reads, and
+# test/prune.test.ts fails if anything named in that document is missing here.
+#
+# Nothing in this file can be named by a recipe: prune.also_remove takes values from a closed list
+# and none of these appears on it. This file is the SECOND layer — the one that holds when the
+# removal closure, which is not a well-behaved function, tries to take one of them as a dependency.
+#
+# COLUMNS
+#   package   rpm name
+#   role      which link of the repair chain this is
+#   why       the sentence printed when a plan would remove it
+package	role	why
+bootc	update	bootc is the thing that swaps one whole operating system for the next one on restart. Without it this fleet receives no repair ever again.
+rpm-ostree	update	rpm-ostree is how a bootc image is staged and committed. Removing it strands the machine on the image it has.
+ostree	update	ostree stores the deployments. Removing it removes both the running system and the one it would roll back to.
+bootupd	update	bootupd updates the bootloader. A machine whose bootloader can never be updated is a machine that will one day not boot.
+greenboot	rollback	greenboot is the thing that checks the machine reached a login screen after an update and puts the old one back if it did not. Removing it converts a bad update from an inconvenience into a site visit.
+greenboot-default-health-checks	rollback	The health checks greenboot runs. Keeping greenboot and removing its checks gives you a safety net that always reports success.
+grub2-common	boot	The bootloader. greenboot's rollback counts boot attempts through it (D9), so this is part of the safety net and not merely part of starting up.
+shim-x64	boot	The signed first-stage loader. Removing it makes the image unbootable on every Secure Boot machine, which is most of them.
+systemd	init	systemd is the thing that starts everything else on this list.
+systemd-udev	init	Without udev there is no disk, no network card and no keyboard.
+dbus-broker	init	The message bus every desktop and system service talks over.
+NetworkManager	network	NetworkManager is the thing that reaches the network. Every repair this machine will ever receive arrives through it.
+polkit	security	The authorisation layer the policy modes are enforced through. Removing it does not make the machine more open, it makes the policy unprovable.
+selinux-policy-targeted	security	The confinement the image is hardened with. An image that reports a policy it is not running is worse than one that reports none.
+container-selinux	security	Required for the signature policy and the image store to work under SELinux.
+containers-common	signature	Carries /etc/containers/policy.json — the rule that says an image we did not sign does not get installed (D8).
+skopeo	signature	Used by the update agent to inspect and verify what it is about to install.
+dnf5	toolchain	Removing the package manager is the classic way a prune makes an image impossible to build on or repair.
+rpm	toolchain	The package database itself. Without it nothing can report what is installed, including the removal report.
+orca	accessibility	A screen reader. We do not sell an image a blind pupil cannot use, in any policy mode, at any price.
+kmag	accessibility	A screen magnifier. Same rule.
+kvkbd	accessibility	An on-screen keyboard. Same rule.
+onboard	accessibility	An on-screen keyboard. Same rule.
+espeak-ng	accessibility	The speech engine the screen reader talks through. Keeping the reader and removing its voice is a reader that says nothing.
+kernel	base	The kernel belongs to the base image. A recipe cannot name it at all; this row is what stops a closure taking it.
+kernel-core	base	As above.
+kernel-modules	base	As above.

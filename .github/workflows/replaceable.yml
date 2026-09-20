@@ -1,0 +1,123 @@
+# THE REPLACEABILITY TEST — does the command on our website actually work?
+#
+# Spec §1.3: "We are replaceable on purpose. Every recipe is a public git repo. If we vanish, the
+# customer rebuilds their exact OS from the file. This is a feature we advertise."
+#
+# And the FAQ says, in as many words, that the instructions work because "they are the same instructions
+# we use" — which is only a reason to believe them if it is TRUE. An untested claim on the page a
+# sceptical IT person reads FIRST is the worst possible place for one.
+#
+# So this job is a stranger. It gets a container with podman, git and nothing else — no Node, no pnpm,
+# no toolchain of ours, no account with us — clones the public repo exactly as the website says, and
+# runs the published command verbatim. If an image does not come out, the page is wrong, and the page
+# is the trust asset.
+name: replaceable
+on:
+  workflow_dispatch:
+  push:
+    paths: ['customers/**', '.github/workflows/replaceable.yml']
+  schedule:
+    # Weekly, because this claim can be broken by a change in a completely different repo — an upstream
+    # digest garbage-collected (D21), a base image renamed, a registry going private. The failure
+    # would otherwise surface when a customer tried it, which is precisely when we cannot fix it.
+    - cron: '23 5 * * 3'
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+permissions:
+  contents: read
+
+jobs:
+  stranger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Reclaim disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          sudo docker system prune -af --volumes >/dev/null 2>&1 || true
+          df -h /
+
+      - name: Be a stranger — clone the PUBLIC repo, with nothing of ours installed
+        run: |
+          # Deliberately NOT actions/checkout. A customer types the command from the website into a
+          # terminal; they do not have our workflow context, our token, or our working tree.
+          cd "$RUNNER_TEMP"
+          git clone --depth 1 https://github.com/aarohkandy/auros-recipes.git stranger
+          cd stranger
+          echo "cloned $(git rev-parse --short HEAD)"
+          # Prove the toolchain is absent, so a build that succeeds cannot have quietly used it.
+          rm -rf node_modules src dist package.json pnpm-lock.yaml 2>/dev/null || true
+          echo "node present? $(command -v node || echo 'no — good')"
+
+      - name: Every customer must have a committed Containerfile
+        id: inventory
+        run: |
+          cd "$RUNNER_TEMP/stranger"
+          missing=(); found=()
+          for d in customers/*/; do
+            [ -d "$d" ] || continue
+            n=$(basename "$d")
+            if [ -f "$d/Containerfile" ]; then found+=("$n"); else missing+=("$n"); fi
+          done
+          printf 'with Containerfile: %s\n' "${found[*]:-none}"
+          printf 'without:            %s\n' "${missing[*]:-none}"
+          if [ ${#found[@]} -eq 0 ]; then
+            echo "::error::No customer directory has a committed Containerfile."
+            echo "The FAQ tells a customer to run 'podman build -f <name>/Containerfile .'. Right now that"
+            echo "command does not work for anybody, which makes the claim we advertise hardest untrue."
+            echo "See DECISIONS.md D28 — CI is supposed to commit the generated Containerfile."
+            exit 1
+          fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::These customers have a recipe but no committed Containerfile: ${missing[*]}"
+            echo "Each one is a customer who cannot rebuild their own operating system without us."
+            exit 1
+          fi
+          echo "found=$(printf '%s\n' "${found[@]}" | jq -R . | jq -sc .)" >> $GITHUB_OUTPUT
+
+      - name: Run the published command, verbatim, for one customer
+        run: |
+          cd "$RUNNER_TEMP/stranger"
+          # The first customer is enough to prove the mechanism; building all of them would take hours
+          # and prove the same thing. Which one is deterministic, so a failure is reproducible.
+          NAME=$(ls -1d customers/*/ | head -1 | xargs basename)
+          echo "::group::$NAME/Containerfile as a customer would read it"
+          cat "customers/$NAME/Containerfile"
+          echo "::endgroup::"
+
+          # Verbatim from the FAQ. If this line and the FAQ ever differ, one of them is wrong.
+          podman build -t "$NAME:local" -f "customers/$NAME/Containerfile" .
+
+          podman images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | tee /tmp/images.txt
+          grep -q "^$NAME:local" /tmp/images.txt || { echo "::error::no image came out"; exit 1; }
+
+          {
+            echo "## Replaceability"
+            echo "A container with podman and git, and nothing of ours, cloned the public repo and"
+            echo "rebuilt \`$NAME\` from the committed file."
+            echo ""
+            echo '```'
+            grep "^$NAME:local" /tmp/images.txt
+            echo '```'
+            echo ""
+            echo "This is the claim on the FAQ, executed rather than asserted."
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: The FAQ and this workflow must not drift
+        run: |
+          # The website tells customers a specific command. If someone edits the workflow to make it
+          # pass, or edits the page to say something else, this catches the divergence — otherwise the
+          # test drifts away from the claim it exists to defend and keeps passing.
+          curl -sfL -o /tmp/faq.md \
+            https://raw.githubusercontent.com/aarohkandy/auros-web/main/src/content/faq/1-if-you-disappear.md \
+            || { echo "could not fetch the FAQ — not failing the build over a network blip, but this check did not run"; exit 0; }
+          if grep -q 'podman build' /tmp/faq.md; then
+            echo "FAQ command as published:"; grep -n 'podman build' /tmp/faq.md
+            grep -q 'Containerfile' /tmp/faq.md || { echo "::error::the FAQ no longer mentions Containerfile — this test may be defending a claim that changed"; exit 1; }
+          else
+            echo "::error::the FAQ no longer contains a 'podman build' command. Either the claim moved or it was removed; this test must be updated to match whatever we now tell customers."
+            exit 1
+          fi

@@ -5,13 +5,17 @@
   "type": "module",
   "description": "The recipe toolchain: validate a recipe.yaml, compile it to a Containerfile, explain it in English.",
   "license": "Apache-2.0",
-  "engines": { "node": ">=22.18.0" },
-  "bin": { "auros-recipe": "./dist/cli.js" },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "auros-recipe": "./dist/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepare": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json --noEmit && node --test test/*.test.ts"
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "tsc -p tsconfig.test.json && node --test test/*.test.ts"
   },
   "dependencies": {
     "ajv": "^8.17.1",

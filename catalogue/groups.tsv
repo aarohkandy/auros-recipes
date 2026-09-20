@@ -1,0 +1,63 @@
+# What is inside a named group.
+#
+# A recipe never names a package. It names a group — "media players", "printing" — and this file
+# says what that means. Two consequences, both deliberate:
+#
+#   A group is the unit of KEEPING as well as of removing. prune.also_keep: [printing] keeps the
+#   whole printing stack, because keeping one file out of a printing stack gives you a printer that
+#   prints nothing.
+#
+#   Nothing on schema/PROTECTED.md's list appears in any group here, and test/prune.test.ts fails
+#   if it ever does. That test is the point of this file being data rather than prose.
+#
+# COLUMNS
+#   group     the name as a recipe writes it
+#   kind      flatpak | rpm
+#   ref       the Flatpak application id, or the rpm package name
+group	kind	ref
+bluetooth	rpm	bluez
+bluetooth	rpm	bluez-tools
+bluetooth	rpm	bluedevil
+developer tools	rpm	gcc
+developer tools	rpm	gcc-c++
+developer tools	rpm	gdb
+developer tools	rpm	git-core
+developer tools	rpm	make
+developer tools	rpm	strace
+developer tools	rpm	kate
+developer tools	rpm	konsole
+games	rpm	kpat
+games	rpm	kmines
+games	rpm	ksudoku
+games	rpm	knetwalk
+games	rpm	kbreakout
+media players	rpm	elisa
+media players	rpm	haruna
+office suite	rpm	libreoffice-core
+office suite	rpm	libreoffice-writer
+office suite	rpm	libreoffice-calc
+office suite	rpm	libreoffice-impress
+printing	rpm	cups
+printing	rpm	cups-filters
+printing	rpm	print-manager
+printing	rpm	system-config-printer
+remote desktop	rpm	krdc
+remote desktop	rpm	krfb
+remote desktop	rpm	freerdp
+sample wallpapers and media	rpm	plasma-workspace-wallpapers
+sample wallpapers and media	rpm	f44-backgrounds-extras-gnome
+sample wallpapers and media	rpm	desktop-backgrounds-compat
+scanning	rpm	sane-backends-drivers-scanners
+scanning	rpm	skanlite
+scanning	rpm	skanpage
+smartcard readers	rpm	pcsc-lite
+smartcard readers	rpm	opensc
+usb storage	rpm	usbutils
+usb storage	rpm	udisks2
+virtualisation	rpm	qemu-kvm-core
+virtualisation	rpm	libvirt-daemon
+virtualisation	rpm	virt-manager
+webcam	rpm	v4l-utils
+webcam	rpm	kamoso
+wired networking	rpm	NetworkManager-tui
+wired networking	rpm	ethtool

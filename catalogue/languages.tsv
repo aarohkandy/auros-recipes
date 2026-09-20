@@ -1,0 +1,42 @@
+# A language, as a person names it, and what the image needs in order to draw it.
+#
+# The recipe says "Marathi". It never says mr_IN.UTF-8, and it never lists a font package, because
+# somebody who typed the wrong locale code cannot check it and somebody who forgot a font package
+# gets a first-boot screen of empty boxes — the worst possible first impression, and one that is
+# invisible in a code review.
+#
+# A language that is not in this file is REFUSED, not guessed at. "We do not know which fonts that
+# needs" is a true sentence; installing nothing and hoping is not.
+#
+# COLUMNS
+#   language  as written in a recipe
+#   locale    the locale the image is set to
+#   scripts   the Unicode scripts this language is written in, comma separated. first_boot_message
+#             is checked against the union of these across language + other_languages.
+#   fonts     font packages, comma separated, or - meaning we have none. A row with - is refused
+#             with its own sentence: the language is known and the fonts are missing, which is a gap
+#             to fill rather than a typo to correct.
+language	locale	scripts	fonts
+Bengali	bn_IN.UTF-8	Bengali	google-noto-sans-bengali-vf-fonts,google-noto-serif-bengali-vf-fonts
+English (India)	en_IN.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+English (United Kingdom)	en_GB.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+English (United States)	en_US.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+French	fr_FR.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+German	de_DE.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Greek	el_GR.UTF-8	Greek	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Hindi	hi_IN.UTF-8	Devanagari	google-noto-sans-devanagari-vf-fonts,google-noto-serif-devanagari-vf-fonts
+Indonesian	id_ID.UTF-8	Latin	google-noto-sans-vf-fonts
+Italian	it_IT.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Marathi	mr_IN.UTF-8	Devanagari	google-noto-sans-devanagari-vf-fonts,google-noto-serif-devanagari-vf-fonts
+Dutch	nl_NL.UTF-8	Latin	google-noto-sans-vf-fonts
+Polish	pl_PL.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Portuguese (Brazil)	pt_BR.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Russian	ru_RU.UTF-8	Cyrillic	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Spanish	es_ES.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Spanish (Latin America)	es_419.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Swahili	sw_KE.UTF-8	Latin	google-noto-sans-vf-fonts
+Tamil	ta_IN.UTF-8	Tamil	google-noto-sans-tamil-vf-fonts,google-noto-serif-tamil-vf-fonts
+Telugu	te_IN.UTF-8	Telugu	google-noto-sans-telugu-vf-fonts,google-noto-serif-telugu-vf-fonts
+Turkish	tr_TR.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Ukrainian	uk_UA.UTF-8	Cyrillic	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts
+Vietnamese	vi_VN.UTF-8	Latin	google-noto-sans-vf-fonts,google-noto-serif-vf-fonts

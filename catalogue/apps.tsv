@@ -1,0 +1,53 @@
+# Applications, by the name a person says.
+#
+# An entry here is the ONLY way an application reaches a machine. There is no free-text package
+# field anywhere in a recipe, so this file is the whole vocabulary of installation.
+#
+# COLUMNS
+#   name        exactly as it is written in a recipe's apps: list. No digits — see $defs/appName.
+#   kind        flatpak | rpm
+#   ref         the Flatpak application id, or the rpm package name
+#   group       the removable group this belongs to, or - if it belongs to none.
+#               If a recipe installs this app AND removes this group, that is a contradiction and
+#               the validator refuses it rather than picking one.
+#   capability  terminal | installs-software | -
+#               A capability is a door. An app that opens a terminal on a locked fleet defeats the
+#               policy by being installed, which no schema rule can see, so validate.ts checks it.
+name	kind	ref	group	capability
+Archive Manager	rpm	ark	-	-
+Audio Player	flatpak	org.gnome.Rhythmbox	media players	-
+Calculator	rpm	kcalc	-	-
+Calendar	rpm	korganizer	-	-
+Camera	rpm	kamoso	webcam	-
+Chromium	flatpak	org.chromium.Chromium	-	-
+Clock	rpm	kclock	-	-
+Document Viewer	rpm	okular	-	-
+Drawing	rpm	kolourpaint	-	-
+Files	rpm	dolphin	-	-
+Firefox	flatpak	org.mozilla.firefox	-	-
+GCompris	flatpak	org.kde.gcompris	-	-
+GIMP	flatpak	org.gimp.GIMP	-	-
+Google Chrome	flatpak	com.google.Chrome	-	-
+Image Viewer	rpm	gwenview	-	-
+Inkscape	flatpak	org.inkscape.Inkscape	-	-
+Kate	rpm	kate	developer tools	-
+Konsole	rpm	konsole	developer tools	terminal
+LibreOffice Calc	flatpak	org.libreoffice.LibreOffice	office suite	-
+LibreOffice Impress	flatpak	org.libreoffice.LibreOffice	office suite	-
+LibreOffice Writer	flatpak	org.libreoffice.LibreOffice	office suite	-
+Mail	rpm	kmail	-	-
+Music Player	rpm	elisa	media players	-
+Notes	rpm	knotes	-	-
+Podman Desktop	flatpak	io.podman_desktop.PodmanDesktop	virtualisation	-
+Remote Desktop	rpm	krdc	remote desktop	-
+Scanner	rpm	skanlite	scanning	-
+Scratch	flatpak	edu.mit.Scratch	-	-
+Screenshot	rpm	spectacle	-	-
+Software Centre	rpm	plasma-discover	-	installs-software
+System Monitor	rpm	plasma-systemmonitor	-	-
+Text Editor	rpm	kwrite	-	-
+Thunderbird	flatpak	org.mozilla.Thunderbird	-	-
+VLC Media Player	flatpak	org.videolan.VLC	media players	-
+Video Player	rpm	haruna	media players	-
+Visual Studio Code	flatpak	com.visualstudio.code	developer tools	-
+Weather	rpm	kweather	-	-

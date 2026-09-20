@@ -1,0 +1,46 @@
+# Keyboard layouts and the key combination that switches between them.
+#
+# Two sections in one file, told apart by the kind column.
+#
+#   layout  a layout a recipe may name, as keyboard: (Latin only) or second_script: (anything).
+#           The Latin-only rule on keyboard: is a safety rule, not a preference: the login screen
+#           and the disk-unlock prompt come up before any input method is running, so a fleet whose
+#           primary layout cannot type a password is a fleet nobody can log into.
+#   toggle  a switch_scripts_with: value and the xkb option that implements it.
+#
+# COLUMNS
+#   kind    layout | toggle
+#   name    as written in a recipe
+#   xkb     xkb layout[:variant] for a layout; the xkb option for a toggle
+#   script  the script this layout types, for a layout; - for a toggle
+kind	name	xkb	script
+layout	English (US)	us	Latin
+layout	English (UK)	gb	Latin
+layout	English (India)	in:eng	Latin
+layout	French	fr	Latin
+layout	German	de	Latin
+layout	Spanish	es	Latin
+layout	Spanish (Latin America)	latam	Latin
+layout	Portuguese (Brazil)	br	Latin
+layout	Italian	it	Latin
+layout	Dutch	nl	Latin
+layout	Polish	pl	Latin
+layout	Turkish	tr	Latin
+layout	Vietnamese	vn	Latin
+layout	Indonesian	us	Latin
+layout	Swahili	us	Latin
+layout	Marathi (InScript)	in:mar-inscript	Devanagari
+layout	Hindi (InScript)	in:hin-inscript	Devanagari
+layout	Bengali (InScript)	in:ben-inscript	Bengali
+layout	Tamil (InScript)	in:tam	Tamil
+layout	Telugu (InScript)	in:tel	Telugu
+layout	Arabic	ara	Arabic
+layout	Greek	gr	Greek
+layout	Hebrew	il	Hebrew
+layout	Russian	ru	Cyrillic
+layout	Ukrainian	ua	Cyrillic
+layout	Thai	th	Thai
+layout	Amharic	et	Ethiopic
+toggle	Windows key + Spacebar	grp:win_space_toggle	-
+toggle	Alt + Shift	grp:alt_shift_toggle	-
+toggle	Ctrl + Spacebar	grp:ctrl_space_toggle	-
