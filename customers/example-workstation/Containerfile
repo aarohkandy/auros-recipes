@@ -1,0 +1,168 @@
+# =================================================================================================
+# GENERATED FILE. DO NOT EDIT.
+#
+# Written by `auros-recipe compile` from customers/example-workstation/recipe.yaml.
+# Edit that file and recompile. An edit here is lost on the next rebuild, and the next rebuild
+# is tonight.
+#
+#   recipe            example-workstation
+#   base image        ghcr.io/aarohkandy/auros-base:hardened
+#   base pinned by    tag only -- this recipe has never been built, so no digest was available
+#   namespace from    auros.config.json (the one file that holds it)
+#   SOURCE_DATE_EPOCH 1789862400 (midnight UTC on 2026-09-20, the recipe's approval date)
+#   architecture      x86_64
+#
+# THE BASE IS NOT CHOSEN HERE. The default of ARG BASE below comes from auros.config.json, the
+# one file that holds the namespace. Nothing in a recipe can influence it -- not a registry, not
+# a tag, not a digest. Every fleet sits on the same foundation, and that is the only reason a
+# security fix is one rebuild instead of a spreadsheet.
+#
+# THE ONE OVERRIDE, AND WHY IT EXISTS. `--build-arg BASE=...` swaps the foundation for one local
+# build. It is not reachable from recipe.yaml -- the validator refuses a recipe that names a base
+# at all -- so it cannot put one fleet on a different foundation from another. It exists for the
+# single case the replaceability page documents: our registry is gone, you have built the base
+# yourself from its public repository, and you need this file to point at your copy. Without it
+# that instruction would be a command that cannot work, which is worse than no instruction.
+#
+# The digest pin is for this build only. When the base moves, propagation notices this recipe is
+# stale and rebuilds it against the new digest. A pin that lived in the recipe would freeze this
+# organisation off the rebuild that carries the next security fix.
+#
+# NO BUILD CONTEXT IS REQUIRED. Everything this file installs it carries inline. `podman build`
+# against an empty directory produces the image. That is what makes "if we vanish, you rebuild
+# your exact operating system from the file" something you can test rather than something we say.
+#
+# WHO THESE MACHINES ARE FOR, in the words of the person who ordered them:
+#
+#     One developer desktop belonging to the person who maintains these recipes. It keeps the
+#     ordinary desktop and adds a working set on top rather than being stripped to a handful of
+#     applications, and it is the only machine in this repository with a command line.
+#
+# DISCLOSED AT VALIDATION TIME:
+#   - hardware.models[0]: 'framework-laptop-thirteen-amd' has no row in hardware/compat.tsv yet. Allowed, and stamped on the build report and on the pull request as untested hardware, so it is a disclosed unknown rather than a skipped check.
+#   - theme: recorded in the image as data. The desktop layer that reads it is not built yet, so the preset, accent, text scale and cursor size do not change how these machines look today. This is stamped on the build report rather than left for the customer to notice.
+# =================================================================================================
+
+ARG BASE=ghcr.io/aarohkandy/auros-base:hardened
+FROM ${BASE}
+
+ARG SOURCE_DATE_EPOCH=1789862400
+
+# -euo pipefail for every RUN below rather than repeated at the top of each. A build step that
+# fails quietly in the middle of a pipeline is how an image ships half-configured, and
+# DECISIONS.md D19 is what that cost us the first time.
+SHELL ["/usr/bin/bash", "-euo", "pipefail", "-c"]
+
+# -------------------------------------------------------------------------------------------------
+# EVERY HUMAN STRING IN THIS RECIPE, AS DATA.
+#
+# base64 is [A-Za-z0-9+/=]. No byte of what a customer wrote is ever a shell word, whatever
+# they wrote, which is the whole reason this is one encoded blob rather than ten echo lines.
+# Decode it to read it:  base64 -d <<< '<the string below>'
+#
+# HONEST GAP: branding.json also carries the theme block, and the desktop layer that reads it
+# is not built yet. Today those fields reach the image as data and are applied by nothing.
+# Validation says so on every recipe that sets a theme, so it is a disclosed gap rather than a
+# field quietly doing nothing.
+# -------------------------------------------------------------------------------------------------
+RUN install -d -m 0755 /usr/share/auros/branding && \
+    printf '%s' 'ewogICJhcHByb3ZlZF9ieSI6IHsKICAgICJkYXRlIjogIjIwMjYtMDktMjAiLAogICAgImVucm9sbWVudCI6ICJwZW5kaW5nIiwKICAgICJuYW1lIjogIkEuIEthbmR5IiwKICAgICJyb2xlIjogIk1haW50YWluZXIiCiAgfSwKICAiZmlyc3RfYm9vdF9tZXNzYWdlIjogbnVsbCwKICAiaGVscGRlc2siOiB7CiAgICAibGFiZWwiOiAiSXQgaXMgbXkgb3duIG1hY2hpbmUiLAogICAgInBob25lIjogIis0NCAyMCA3OTQ2IDAwMDAiCiAgfSwKICAibWFjaGluZXMiOiAxLAogICJvcmdhbmlzYXRpb24iOiAiRXhhbXBsZSBTdHVkaW8iLAogICJwb2xpY3kiOiAib3BlbiIsCiAgInJlY2lwZSI6ICJleGFtcGxlLXdvcmtzdGF0aW9uIiwKICAidGhlbWUiOiB7CiAgICAiYWNjZW50IjogIiNkOTY4MmUiLAogICAgInByZXNldCI6ICJkYXJrIiwKICAgICJ0ZXh0X3NjYWxlIjogMQogIH0sCiAgIndpbmRvd3NfYXBwcyI6IHsKICAgICJlbmFibGVkIjogZmFsc2UKICB9Cn0=' | base64 -d > /usr/share/auros/branding/branding.json && \
+    chmod 0644 /usr/share/auros/branding/branding.json
+
+RUN install -d -m 0755 /usr/share/auros && \
+    printf '%s' 'ewogICJiYXNlIjogImdoY3IuaW8vYWFyb2hrYW5keS9hdXJvcy1iYXNlOmhhcmRlbmVkIiwKICAiZmxvb3IiOiB7CiAgICAibWV0IjogbnVsbCwKICAgICJtdXN0X3JlbW92ZV9hdF9sZWFzdCI6IDQwCiAgfSwKICAiZ2VuZXJhdGVkX2J5IjogImF1cm9zLXJlY2lwZSBjb21waWxlIiwKICAia2VwdF9hbHRob3VnaF9ub3RoaW5nX2Fza2VkX2Zvcl90aGVtIjogewogICAgImhlYWRpbmciOiAiS2VwdCBhbHRob3VnaCBub3RoaW5nIGFza2VkIGZvciB0aGVtLCBiZWNhdXNlIHRoZSBtYWNoaW5lIGNhbm5vdCBzdGFydCwgdXBkYXRlIG9yIHJvbGwgYmFjayB3aXRob3V0IHRoZXNlIiwKICAgICJwYWNrYWdlcyI6IFsKICAgICAgewogICAgICAgICJwYWNrYWdlIjogImJvb3RjIiwKICAgICAgICAicm9sZSI6ICJ1cGRhdGUiLAogICAgICAgICJ3aHkiOiAiYm9vdGMgaXMgdGhlIHRoaW5nIHRoYXQgc3dhcHMgb25lIHdob2xlIG9wZXJhdGluZyBzeXN0ZW0gZm9yIHRoZSBuZXh0IG9uZSBvbiByZXN0YXJ0LiBXaXRob3V0IGl0IHRoaXMgZmxlZXQgcmVjZWl2ZXMgbm8gcmVwYWlyIGV2ZXIgYWdhaW4uIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAiYm9vdHVwZCIsCiAgICAgICAgInJvbGUiOiAidXBkYXRlIiwKICAgICAgICAid2h5IjogImJvb3R1cGQgdXBkYXRlcyB0aGUgYm9vdGxvYWRlci4gQSBtYWNoaW5lIHdob3NlIGJvb3Rsb2FkZXIgY2FuIG5ldmVyIGJlIHVwZGF0ZWQgaXMgYSBtYWNoaW5lIHRoYXQgd2lsbCBvbmUgZGF5IG5vdCBib290LiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogImNvbnRhaW5lci1zZWxpbnV4IiwKICAgICAgICAicm9sZSI6ICJzZWN1cml0eSIsCiAgICAgICAgIndoeSI6ICJSZXF1aXJlZCBmb3IgdGhlIHNpZ25hdHVyZSBwb2xpY3kgYW5kIHRoZSBpbWFnZSBzdG9yZSB0byB3b3JrIHVuZGVyIFNFTGludXguIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAiY29udGFpbmVycy1jb21tb24iLAogICAgICAgICJyb2xlIjogInNpZ25hdHVyZSIsCiAgICAgICAgIndoeSI6ICJDYXJyaWVzIC9ldGMvY29udGFpbmVycy9wb2xpY3kuanNvbiDigJQgdGhlIHJ1bGUgdGhhdCBzYXlzIGFuIGltYWdlIHdlIGRpZCBub3Qgc2lnbiBkb2VzIG5vdCBnZXQgaW5zdGFsbGVkIChEOCkuIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAiZGJ1cy1icm9rZXIiLAogICAgICAgICJyb2xlIjogImluaXQiLAogICAgICAgICJ3aHkiOiAiVGhlIG1lc3NhZ2UgYnVzIGV2ZXJ5IGRlc2t0b3AgYW5kIHN5c3RlbSBzZXJ2aWNlIHRhbGtzIG92ZXIuIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAiZG5mNSIsCiAgICAgICAgInJvbGUiOiAidG9vbGNoYWluIiwKICAgICAgICAid2h5IjogIlJlbW92aW5nIHRoZSBwYWNrYWdlIG1hbmFnZXIgaXMgdGhlIGNsYXNzaWMgd2F5IGEgcHJ1bmUgbWFrZXMgYW4gaW1hZ2UgaW1wb3NzaWJsZSB0byBidWlsZCBvbiBvciByZXBhaXIuIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAiZXNwZWFrLW5nIiwKICAgICAgICAicm9sZSI6ICJhY2Nlc3NpYmlsaXR5IiwKICAgICAgICAid2h5IjogIlRoZSBzcGVlY2ggZW5naW5lIHRoZSBzY3JlZW4gcmVhZGVyIHRhbGtzIHRocm91Z2guIEtlZXBpbmcgdGhlIHJlYWRlciBhbmQgcmVtb3ZpbmcgaXRzIHZvaWNlIGlzIGEgcmVhZGVyIHRoYXQgc2F5cyBub3RoaW5nLiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogImdyZWVuYm9vdCIsCiAgICAgICAgInJvbGUiOiAicm9sbGJhY2siLAogICAgICAgICJ3aHkiOiAiZ3JlZW5ib290IGlzIHRoZSB0aGluZyB0aGF0IGNoZWNrcyB0aGUgbWFjaGluZSByZWFjaGVkIGEgbG9naW4gc2NyZWVuIGFmdGVyIGFuIHVwZGF0ZSBhbmQgcHV0cyB0aGUgb2xkIG9uZSBiYWNrIGlmIGl0IGRpZCBub3QuIFJlbW92aW5nIGl0IGNvbnZlcnRzIGEgYmFkIHVwZGF0ZSBmcm9tIGFuIGluY29udmVuaWVuY2UgaW50byBhIHNpdGUgdmlzaXQuIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAiZ3JlZW5ib290LWRlZmF1bHQtaGVhbHRoLWNoZWNrcyIsCiAgICAgICAgInJvbGUiOiAicm9sbGJhY2siLAogICAgICAgICJ3aHkiOiAiVGhlIGhlYWx0aCBjaGVja3MgZ3JlZW5ib290IHJ1bnMuIEtlZXBpbmcgZ3JlZW5ib290IGFuZCByZW1vdmluZyBpdHMgY2hlY2tzIGdpdmVzIHlvdSBhIHNhZmV0eSBuZXQgdGhhdCBhbHdheXMgcmVwb3J0cyBzdWNjZXNzLiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogImdydWIyLWNvbW1vbiIsCiAgICAgICAgInJvbGUiOiAiYm9vdCIsCiAgICAgICAgIndoeSI6ICJUaGUgYm9vdGxvYWRlci4gZ3JlZW5ib290J3Mgcm9sbGJhY2sgY291bnRzIGJvb3QgYXR0ZW1wdHMgdGhyb3VnaCBpdCAoRDkpLCBzbyB0aGlzIGlzIHBhcnQgb2YgdGhlIHNhZmV0eSBuZXQgYW5kIG5vdCBtZXJlbHkgcGFydCBvZiBzdGFydGluZyB1cC4iCiAgICAgIH0sCiAgICAgIHsKICAgICAgICAicGFja2FnZSI6ICJrZXJuZWwiLAogICAgICAgICJyb2xlIjogImJhc2UiLAogICAgICAgICJ3aHkiOiAiVGhlIGtlcm5lbCBiZWxvbmdzIHRvIHRoZSBiYXNlIGltYWdlLiBBIHJlY2lwZSBjYW5ub3QgbmFtZSBpdCBhdCBhbGw7IHRoaXMgcm93IGlzIHdoYXQgc3RvcHMgYSBjbG9zdXJlIHRha2luZyBpdC4iCiAgICAgIH0sCiAgICAgIHsKICAgICAgICAicGFja2FnZSI6ICJrZXJuZWwtY29yZSIsCiAgICAgICAgInJvbGUiOiAiYmFzZSIsCiAgICAgICAgIndoeSI6ICJBcyBhYm92ZS4iCiAgICAgIH0sCiAgICAgIHsKICAgICAgICAicGFja2FnZSI6ICJrZXJuZWwtbW9kdWxlcyIsCiAgICAgICAgInJvbGUiOiAiYmFzZSIsCiAgICAgICAgIndoeSI6ICJBcyBhYm92ZS4iCiAgICAgIH0sCiAgICAgIHsKICAgICAgICAicGFja2FnZSI6ICJrbWFnIiwKICAgICAgICAicm9sZSI6ICJhY2Nlc3NpYmlsaXR5IiwKICAgICAgICAid2h5IjogIkEgc2NyZWVuIG1hZ25pZmllci4gU2FtZSBydWxlLiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogImt2a2JkIiwKICAgICAgICAicm9sZSI6ICJhY2Nlc3NpYmlsaXR5IiwKICAgICAgICAid2h5IjogIkFuIG9uLXNjcmVlbiBrZXlib2FyZC4gU2FtZSBydWxlLiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogIk5ldHdvcmtNYW5hZ2VyIiwKICAgICAgICAicm9sZSI6ICJuZXR3b3JrIiwKICAgICAgICAid2h5IjogIk5ldHdvcmtNYW5hZ2VyIGlzIHRoZSB0aGluZyB0aGF0IHJlYWNoZXMgdGhlIG5ldHdvcmsuIEV2ZXJ5IHJlcGFpciB0aGlzIG1hY2hpbmUgd2lsbCBldmVyIHJlY2VpdmUgYXJyaXZlcyB0aHJvdWdoIGl0LiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogIm9uYm9hcmQiLAogICAgICAgICJyb2xlIjogImFjY2Vzc2liaWxpdHkiLAogICAgICAgICJ3aHkiOiAiQW4gb24tc2NyZWVuIGtleWJvYXJkLiBTYW1lIHJ1bGUuIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAib3JjYSIsCiAgICAgICAgInJvbGUiOiAiYWNjZXNzaWJpbGl0eSIsCiAgICAgICAgIndoeSI6ICJBIHNjcmVlbiByZWFkZXIuIFdlIGRvIG5vdCBzZWxsIGFuIGltYWdlIGEgYmxpbmQgcHVwaWwgY2Fubm90IHVzZSwgaW4gYW55IHBvbGljeSBtb2RlLCBhdCBhbnkgcHJpY2UuIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAib3N0cmVlIiwKICAgICAgICAicm9sZSI6ICJ1cGRhdGUiLAogICAgICAgICJ3aHkiOiAib3N0cmVlIHN0b3JlcyB0aGUgZGVwbG95bWVudHMuIFJlbW92aW5nIGl0IHJlbW92ZXMgYm90aCB0aGUgcnVubmluZyBzeXN0ZW0gYW5kIHRoZSBvbmUgaXQgd291bGQgcm9sbCBiYWNrIHRvLiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogInBvbGtpdCIsCiAgICAgICAgInJvbGUiOiAic2VjdXJpdHkiLAogICAgICAgICJ3aHkiOiAiVGhlIGF1dGhvcmlzYXRpb24gbGF5ZXIgdGhlIHBvbGljeSBtb2RlcyBhcmUgZW5mb3JjZWQgdGhyb3VnaC4gUmVtb3ZpbmcgaXQgZG9lcyBub3QgbWFrZSB0aGUgbWFjaGluZSBtb3JlIG9wZW4sIGl0IG1ha2VzIHRoZSBwb2xpY3kgdW5wcm92YWJsZS4iCiAgICAgIH0sCiAgICAgIHsKICAgICAgICAicGFja2FnZSI6ICJycG0iLAogICAgICAgICJyb2xlIjogInRvb2xjaGFpbiIsCiAgICAgICAgIndoeSI6ICJUaGUgcGFja2FnZSBkYXRhYmFzZSBpdHNlbGYuIFdpdGhvdXQgaXQgbm90aGluZyBjYW4gcmVwb3J0IHdoYXQgaXMgaW5zdGFsbGVkLCBpbmNsdWRpbmcgdGhlIHJlbW92YWwgcmVwb3J0LiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogInJwbS1vc3RyZWUiLAogICAgICAgICJyb2xlIjogInVwZGF0ZSIsCiAgICAgICAgIndoeSI6ICJycG0tb3N0cmVlIGlzIGhvdyBhIGJvb3RjIGltYWdlIGlzIHN0YWdlZCBhbmQgY29tbWl0dGVkLiBSZW1vdmluZyBpdCBzdHJhbmRzIHRoZSBtYWNoaW5lIG9uIHRoZSBpbWFnZSBpdCBoYXMuIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAic2VsaW51eC1wb2xpY3ktdGFyZ2V0ZWQiLAogICAgICAgICJyb2xlIjogInNlY3VyaXR5IiwKICAgICAgICAid2h5IjogIlRoZSBjb25maW5lbWVudCB0aGUgaW1hZ2UgaXMgaGFyZGVuZWQgd2l0aC4gQW4gaW1hZ2UgdGhhdCByZXBvcnRzIGEgcG9saWN5IGl0IGlzIG5vdCBydW5uaW5nIGlzIHdvcnNlIHRoYW4gb25lIHRoYXQgcmVwb3J0cyBub25lLiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogInNoaW0teDY0IiwKICAgICAgICAicm9sZSI6ICJib290IiwKICAgICAgICAid2h5IjogIlRoZSBzaWduZWQgZmlyc3Qtc3RhZ2UgbG9hZGVyLiBSZW1vdmluZyBpdCBtYWtlcyB0aGUgaW1hZ2UgdW5ib290YWJsZSBvbiBldmVyeSBTZWN1cmUgQm9vdCBtYWNoaW5lLCB3aGljaCBpcyBtb3N0IG9mIHRoZW0uIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAic2tvcGVvIiwKICAgICAgICAicm9sZSI6ICJzaWduYXR1cmUiLAogICAgICAgICJ3aHkiOiAiVXNlZCBieSB0aGUgdXBkYXRlIGFnZW50IHRvIGluc3BlY3QgYW5kIHZlcmlmeSB3aGF0IGl0IGlzIGFib3V0IHRvIGluc3RhbGwuIgogICAgICB9LAogICAgICB7CiAgICAgICAgInBhY2thZ2UiOiAic3lzdGVtZCIsCiAgICAgICAgInJvbGUiOiAiaW5pdCIsCiAgICAgICAgIndoeSI6ICJzeXN0ZW1kIGlzIHRoZSB0aGluZyB0aGF0IHN0YXJ0cyBldmVyeXRoaW5nIGVsc2Ugb24gdGhpcyBsaXN0LiIKICAgICAgfSwKICAgICAgewogICAgICAgICJwYWNrYWdlIjogInN5c3RlbWQtdWRldiIsCiAgICAgICAgInJvbGUiOiAiaW5pdCIsCiAgICAgICAgIndoeSI6ICJXaXRob3V0IHVkZXYgdGhlcmUgaXMgbm8gZGlzaywgbm8gbmV0d29yayBjYXJkIGFuZCBubyBrZXlib2FyZC4iCiAgICAgIH0KICAgIF0KICB9LAogICJtZWFzdXJlZCI6IHsKICAgICJieXRlc19yZWNsYWltZWQiOiBudWxsLAogICAgImltYWdlX3NpemVfYnl0ZXMiOiBudWxsLAogICAgIm1lYXN1cmVkX2F0IjogbnVsbCwKICAgICJyZW1vdmVkX2NvdW50IjogbnVsbAogIH0sCiAgIm5vdF9wcmVpbnN0YWxsZWQiOiBbXSwKICAicGxhbm5lZCI6IFsKICAgIHsKICAgICAgImJ5dGVzX3JlY2xhaW1lZCI6IG51bGwsCiAgICAgICJncm91cCI6ICJzYW1wbGUgd2FsbHBhcGVycyBhbmQgbWVkaWEiLAogICAgICAib3V0Y29tZSI6IG51bGwsCiAgICAgICJwYWNrYWdlIjogImRlc2t0b3AtYmFja2dyb3VuZHMtY29tcGF0IiwKICAgICAgInJlYXNvbiI6ICJ0aGUgcmVjaXBlIGFza2VkIGZvciBcInNhbXBsZSB3YWxscGFwZXJzIGFuZCBtZWRpYVwiIHRvIGJlIHJlbW92ZWQiLAogICAgICAidmVyc2lvbiI6IG51bGwKICAgIH0sCiAgICB7CiAgICAgICJieXRlc19yZWNsYWltZWQiOiBudWxsLAogICAgICAiZ3JvdXAiOiAic2FtcGxlIHdhbGxwYXBlcnMgYW5kIG1lZGlhIiwKICAgICAgIm91dGNvbWUiOiBudWxsLAogICAgICAicGFja2FnZSI6ICJmNDQtYmFja2dyb3VuZHMtZXh0cmFzLWdub21lIiwKICAgICAgInJlYXNvbiI6ICJ0aGUgcmVjaXBlIGFza2VkIGZvciBcInNhbXBsZSB3YWxscGFwZXJzIGFuZCBtZWRpYVwiIHRvIGJlIHJlbW92ZWQiLAogICAgICAidmVyc2lvbiI6IG51bGwKICAgIH0sCiAgICB7CiAgICAgICJieXRlc19yZWNsYWltZWQiOiBudWxsLAogICAgICAiZ3JvdXAiOiAiZ2FtZXMiLAogICAgICAib3V0Y29tZSI6IG51bGwsCiAgICAgICJwYWNrYWdlIjogImticmVha291dCIsCiAgICAgICJyZWFzb24iOiAidGhlIHJlY2lwZSBhc2tlZCBmb3IgXCJnYW1lc1wiIHRvIGJlIHJlbW92ZWQiLAogICAgICAidmVyc2lvbiI6IG51bGwKICAgIH0sCiAgICB7CiAgICAgICJieXRlc19yZWNsYWltZWQiOiBudWxsLAogICAgICAiZ3JvdXAiOiAiZ2FtZXMiLAogICAgICAib3V0Y29tZSI6IG51bGwsCiAgICAgICJwYWNrYWdlIjogImttaW5lcyIsCiAgICAgICJyZWFzb24iOiAidGhlIHJlY2lwZSBhc2tlZCBmb3IgXCJnYW1lc1wiIHRvIGJlIHJlbW92ZWQiLAogICAgICAidmVyc2lvbiI6IG51bGwKICAgIH0sCiAgICB7CiAgICAgICJieXRlc19yZWNsYWltZWQiOiBudWxsLAogICAgICAiZ3JvdXAiOiAiZ2FtZXMiLAogICAgICAib3V0Y29tZSI6IG51bGwsCiAgICAgICJwYWNrYWdlIjogImtuZXR3YWxrIiwKICAgICAgInJlYXNvbiI6ICJ0aGUgcmVjaXBlIGFza2VkIGZvciBcImdhbWVzXCIgdG8gYmUgcmVtb3ZlZCIsCiAgICAgICJ2ZXJzaW9uIjogbnVsbAogICAgfSwKICAgIHsKICAgICAgImJ5dGVzX3JlY2xhaW1lZCI6IG51bGwsCiAgICAgICJncm91cCI6ICJnYW1lcyIsCiAgICAgICJvdXRjb21lIjogbnVsbCwKICAgICAgInBhY2thZ2UiOiAia3BhdCIsCiAgICAgICJyZWFzb24iOiAidGhlIHJlY2lwZSBhc2tlZCBmb3IgXCJnYW1lc1wiIHRvIGJlIHJlbW92ZWQiLAogICAgICAidmVyc2lvbiI6IG51bGwKICAgIH0sCiAgICB7CiAgICAgICJieXRlc19yZWNsYWltZWQiOiBudWxsLAogICAgICAiZ3JvdXAiOiAiZ2FtZXMiLAogICAgICAib3V0Y29tZSI6IG51bGwsCiAgICAgICJwYWNrYWdlIjogImtzdWRva3UiLAogICAgICAicmVhc29uIjogInRoZSByZWNpcGUgYXNrZWQgZm9yIFwiZ2FtZXNcIiB0byBiZSByZW1vdmVkIiwKICAgICAgInZlcnNpb24iOiBudWxsCiAgICB9LAogICAgewogICAgICAiYnl0ZXNfcmVjbGFpbWVkIjogbnVsbCwKICAgICAgImdyb3VwIjogInNhbXBsZSB3YWxscGFwZXJzIGFuZCBtZWRpYSIsCiAgICAgICJvdXRjb21lIjogbnVsbCwKICAgICAgInBhY2thZ2UiOiAicGxhc21hLXdvcmtzcGFjZS13YWxscGFwZXJzIiwKICAgICAgInJlYXNvbiI6ICJ0aGUgcmVjaXBlIGFza2VkIGZvciBcInNhbXBsZSB3YWxscGFwZXJzIGFuZCBtZWRpYVwiIHRvIGJlIHJlbW92ZWQiLAogICAgICAidmVyc2lvbiI6IG51bGwKICAgIH0KICBdLAogICJwb3N0X2NvbmRpdGlvbnMiOiBbCiAgICB7CiAgICAgICJhc3NlcnQiOiAidGhlIG1lYXN1cmVkIHJlbW92YWwgY291bnQgaXMgYXQgbGVhc3QgNDAiLAogICAgICAiaWQiOiAiUDEtZmxvb3IiLAogICAgICAid2h5IjogIlRoaXMgaXMgdGhlIGFsYXJtIHRoYXQgY2F0Y2hlcyB1cHN0cmVhbSBxdWlldGx5IHB1dHRpbmcgYmFjayBzb21ldGhpbmcgd2UgdG9vayBvdXQuIEl0IGlzIGNoZWNrZWQgYWdhaW5zdCB3aGF0IHRoZSBidWlsZCBtZWFzdXJlZCwgbmV2ZXIgYWdhaW5zdCB0aGUgcGxhbjogdGhlIHBsYW4gaXMgdGhlIGV4cGxpY2l0IHJlcXVlc3QgYW5kIHRoZSBkZXBlbmRlbmN5IGNsb3N1cmUgaXMgbW9zdCBvZiB0aGUgd29yay4iCiAgICB9LAogICAgewogICAgICAiYXNzZXJ0IjogImFsbCAyNyBwcm90ZWN0ZWQgcGFja2FnZXMgYXJlIGluc3RhbGxlZCBhbmQgdGhlaXIgdW5pdHMgYXJlIGVuYWJsZWQiLAogICAgICAiaWQiOiAiUDItcHJvdGVjdGVkLXByZXNlbnQiLAogICAgICAid2h5IjogIkEgZmxlZXQgdGhhdCBoYXMgc3RvcHBlZCB1cGRhdGluZyBsb29rcyBleGFjdGx5IGxpa2UgYSBmbGVldCB0aGF0IGlzIHVwIHRvIGRhdGUuIEl0IGJvb3RzLCBpdCBsb2dzIGluLCB0aGUgYnJvd3NlciB3b3JrcywgYW5kIHRoZSBkaWZmZXJlbmNlIHNob3dzIHVwIG1vbnRocyBsYXRlciBhcyBhIGNvbXByb21pc2VkIG1hY2hpbmUgb24gYSBzY2hvb2wgbmV0d29yay4gVGhpcyBydW5zIGFnYWluc3QgdGhlIGJ1aWx0IGFydGlmYWN0IHNvIGl0IGhvbGRzIGV2ZW4gaWYgdmFsaWRhdGlvbiB3YXMgYnlwYXNzZWQuIgogICAgfSwKICAgIHsKICAgICAgImFzc2VydCI6ICJldmVyeSBhcHBsaWNhdGlvbiBuYW1lZCBpbiB0aGUgcmVjaXBlIGlzIGxhdW5jaGFibGUgKDcgcGFja2FnZXMsIDYgRmxhdHBha3MpIiwKICAgICAgImlkIjogIlAzLWFwcHMtcHJlc2VudCIsCiAgICAgICJ3aHkiOiAiVGhlIG90aGVyIGhhbGYgb2Ygc3VidHJhY3Rpb24uIEEgcHJ1bmUgdGhhdCBhbHNvIHJlbW92ZWQgc29tZXRoaW5nIHRoZSByZWNpcGUgYXNrZWQgZm9yIGlzIGEgYnJva2VuIG1hY2hpbmUsIGFuZCBcIndlIHJlbW92ZWQgYSBsb3RcIiBpcyBub3QgZXZpZGVuY2UgdGhhdCB0aGUgcmlnaHQgdGhpbmdzIHN1cnZpdmVkLiIKICAgIH0sCiAgICB7CiAgICAgICJhc3NlcnQiOiAidGhlIHB1Ymxpc2hlZCBpbWFnZSBpcyBhdCBtb3N0IDI0IEdCLCBhbmQgbm8gbW9yZSB0aGFuIDEwJSBsYXJnZXIgdGhhbiB0aGUgcHJldmlvdXMgcHVibGlzaGVkIGltYWdlIiwKICAgICAgImlkIjogIlA0LXNpemUtYnVkZ2V0IiwKICAgICAgIndoeSI6ICJTdWJ0cmFjdGlvbiBpcyB0aGUgcHJvZHVjdCwgc28gcXVpZXQgZ3Jvd3RoIGlzIHRoZSBwcm9kdWN0IHF1aWV0bHkgZmFpbGluZy4gVGhlIHNlY29uZCBoYWxmIGNhdGNoZXMgdGhlIGNhc2UgdGhlIGFic29sdXRlIGxpbWl0IG1pc3NlczogYW4gaW1hZ2UgY3JlZXBpbmcgdXB3YXJkIGluc2lkZSBpdHMgYnVkZ2V0LiIKICAgIH0sCiAgICB7CiAgICAgICJhc3NlcnQiOiAicmVtb3ZhbC1yZXBvcnQuanNvbiBoYXMgbm8gbnVsbCBpbiBpdHMgbWVhc3VyZWQgYmxvY2siLAogICAgICAiaWQiOiAiUDUtcmVwb3J0LW1lYXN1cmVkIiwKICAgICAgIndoeSI6ICJUaGUgcmVwb3J0IHNoaXBzIHdpdGggdGhlIGltYWdlIGFuZCB0aGUgY3VzdG9tZXIgcmVhZHMgaXQuIEEgbnVsbCB0aGF0IHJlYWNoZWQgYSBjdXN0b21lciB3b3VsZCBiZSBhIG51bWJlciB3ZSBzYWlkIHdlIHdvdWxkIG1lYXN1cmUgYW5kIGRpZCBub3QuIFNlZSBERUNJU0lPTlMubWQgRDEyOiB3ZSByZXBvcnQgdGhlIHJlYWwgbWVhc3VyZWQgc2l6ZSwgbmV2ZXIgYSBzbWFsbGVyIG9uZSB3ZSBkaWQgbm90IGFjaGlldmUuIgogICAgfQogIF0sCiAgInJlY2lwZSI6ICJleGFtcGxlLXdvcmtzdGF0aW9uIiwKICAic2NoZW1hIjogMSwKICAic2l6ZV9idWRnZXQiOiB7CiAgICAiZ2IiOiAyNCwKICAgICJtZXQiOiBudWxsCiAgfQp9' | base64 -d > /usr/share/auros/prune-plan.json && \
+    chmod 0644 /usr/share/auros/prune-plan.json
+
+RUN install -d -m 0755 /usr/libexec/auros && \
+    printf '%s' 'IyEvdXNyL2Jpbi9iYXNoCiMgYXVyb3MtcHJ1bmUgLS0gZ2VuZXJhdGVkLCBlbWJlZGRlZCBieSBhdXJvcy1yZWNpcGUgY29tcGlsZS4gRG8gbm90IGVkaXQgaW4gdGhlIGltYWdlLgojCiMgUmVhZHMgIC91c3Ivc2hhcmUvYXVyb3MvcHJ1bmUtcGxhbi5qc29uCiMgV3JpdGVzIC91c3Ivc2hhcmUvYXVyb3MvcmVtb3ZhbC1yZXBvcnQuanNvbgojCiMgTm90aGluZyBhIGN1c3RvbWVyIHdyb3RlIGFwcGVhcnMgaW4gdGhpcyBmaWxlLiBUaGVpciByZWNpcGUgYXJyaXZlcyBhcyB0aGUgcGxhbiBKU09OIGFib3ZlLgpzZXQgLWV1byBwaXBlZmFpbAoKUExBTj0vdXNyL3NoYXJlL2F1cm9zL3BydW5lLXBsYW4uanNvbgpSRVBPUlQ9L3Vzci9zaGFyZS9hdXJvcy9yZW1vdmFsLXJlcG9ydC5qc29uCnRlc3QgLXIgIiRQTEFOIgoKbWFwZmlsZSAtdCBXQU5URUQgPCA8KHB5dGhvbjMgLSAiJFBMQU4iIDw8J1BZJwppbXBvcnQganNvbiwgc3lzCnBsYW4gPSBqc29uLmxvYWQob3BlbihzeXMuYXJndlsxXSkpCmZvciBpdGVtIGluIHBsYW5bInBsYW5uZWQiXToKICAgIHByaW50KGl0ZW1bInBhY2thZ2UiXSkKUFkKKQptYXBmaWxlIC10IEdVQVJERUQgPCA8KHB5dGhvbjMgLSAiJFBMQU4iIDw8J1BZJwppbXBvcnQganNvbiwgc3lzCnBsYW4gPSBqc29uLmxvYWQob3BlbihzeXMuYXJndlsxXSkpCmZvciBpdGVtIGluIHBsYW5bImtlcHRfYWx0aG91Z2hfbm90aGluZ19hc2tlZF9mb3JfdGhlbSJdWyJwYWNrYWdlcyJdOgogICAgcHJpbnQoaXRlbVsicGFja2FnZSJdKQpQWQopCgpwcmludGYgJ2F1cm9zLXBydW5lOiAlcyBwYWNrYWdlcyByZXF1ZXN0ZWQgZm9yIHJlbW92YWxcbicgIiR7I1dBTlRFRFtAXX0iCgojIE9ubHkgYXNrIGZvciB3aGF0IGlzIGFjdHVhbGx5IGluc3RhbGxlZC4gQSBtaXNzaW5nIHBhY2thZ2UgaXMgbm90IGFuIGVycm9yOiB1cHN0cmVhbSBtb3ZlcywgYW5kIGEKIyBidWlsZCB0aGF0IGZhaWxzIGJlY2F1c2Ugc29tZXRoaW5nIHdlIHdhbnRlZCBnb25lIGlzIGFscmVhZHkgZ29uZSB3b3VsZCBiZSBhbiBhbGFybSBwb2ludGluZyB0aGUKIyB3cm9uZyB3YXkuClBSRVNFTlQ9KCkKZm9yIHBrZyBpbiAiJHtXQU5URURbQF19IjsgZG8KICAgIGlmIHJwbSAtcSAtLXF1aWV0ICIkcGtnIjsgdGhlbiBQUkVTRU5UKz0oIiRwa2ciKTsgZmkKZG9uZQpwcmludGYgJ2F1cm9zLXBydW5lOiAlcyBvZiB0aGVtIGFyZSBpbnN0YWxsZWRcbicgIiR7I1BSRVNFTlRbQF19IgoKIyBSZWNvcmQgc2l6ZSBhbmQgdmVyc2lvbiBCRUZPUkUgcmVtb3ZhbC4gQWZ0ZXJ3YXJkcyB0aGUgcGFja2FnZSBkYXRhYmFzZSBubyBsb25nZXIga25vd3MuCjogPiAvdG1wL2F1cm9zLXBydW5lLWJlZm9yZS50c3YKZm9yIHBrZyBpbiAiJHtQUkVTRU5UW0BdfSI7IGRvCiAgICBycG0gLXEgLS1xZiAnJXtOQU1FfVx0JXtWRVJTSU9OfS0le1JFTEVBU0V9XHQle1NJWkV9XG4nICIkcGtnIiA+PiAvdG1wL2F1cm9zLXBydW5lLWJlZm9yZS50c3YKZG9uZQoKRE5GPWRuZjU7IGNvbW1hbmQgLXYgZG5mNSA+L2Rldi9udWxsIDI+JjEgfHwgRE5GPWRuZgoKaWYgWyAiJHsjUFJFU0VOVFtAXX0iIC1ndCAwIF07IHRoZW4KICAgICMgUmVzb2x2ZSBmaXJzdC4gUFJPVEVDVEVELm1kIGxheWVyIDI6IHRoZSBjbG9zdXJlIGhhcyBoaXN0b3JpY2FsbHkgdHJpZWQgdG8gdGFrZSBvdXQgdGhlIGluaXQKICAgICMgc3lzdGVtIGFuZCB0aGUgcGFja2FnZSBtYW5hZ2VyIG9uIGl0cyBvd24sIGFuZCBpdCBkb2VzIG5vdCBnZXQgdGhlIGZpbmFsIHdvcmQuCiAgICAiJERORiIgcmVtb3ZlIC0tYXNzdW1lbm8gIiR7UFJFU0VOVFtAXX0iID4gL3RtcC9hdXJvcy1wcnVuZS1yZXNvbHZlLnR4dCAyPiYxIHx8IHRydWUKICAgIGZvciBwa2cgaW4gIiR7R1VBUkRFRFtAXX0iOyBkbwogICAgICAgIGlmIGdyZXAgLUVxICIoXnxbWzpzcGFjZTpdXSkke3BrZ31bLVs6c3BhY2U6XV0iIC90bXAvYXVyb3MtcHJ1bmUtcmVzb2x2ZS50eHQ7IHRoZW4KICAgICAgICAgICAgcHJpbnRmICdhdXJvcy1wcnVuZTogUkVGVVNFRC4gUmVtb3ZpbmcgdGhlIHJlcXVlc3RlZCBwYWNrYWdlcyB3b3VsZCBhbHNvIHRha2UgJXMuXG4nICIkcGtnIiA+JjIKICAgICAgICAgICAgcHJpbnRmICdhdXJvcy1wcnVuZTogdGhhdCBwYWNrYWdlIGlzIG9uIHRoZSBwcm90ZWN0ZWQgc2V0IChzZWUgc2NoZW1hL1BST1RFQ1RFRC5tZCkgYW5kXG4nID4mMgogICAgICAgICAgICBwcmludGYgJ2F1cm9zLXBydW5lOiBhIGZsZWV0IHRoYXQgbG9zZXMgaXQgY2FuIG5ldmVyIGJlIHJlcGFpcmVkIHJlbW90ZWx5IGFnYWluLlxuJyA+JjIKICAgICAgICAgICAgZXhpdCAxCiAgICAgICAgZmkKICAgIGRvbmUKICAgICIkRE5GIiByZW1vdmUgLXkgIiR7UFJFU0VOVFtAXX0iCmZpCgojIFRoZSBndWFyYW50ZWUuIFRoaXMgZG9lcyBub3QgZGVwZW5kIG9uIHBhcnNpbmcgYW55Ym9keSdzIG91dHB1dCBmb3JtYXQuCk1JU1NJTkc9KCkKZm9yIHBrZyBpbiAiJHtHVUFSREVEW0BdfSI7IGRvCiAgICBycG0gLXEgLS1xdWlldCAiJHBrZyIgfHwgTUlTU0lORys9KCIkcGtnIikKZG9uZQppZiBbICIkeyNNSVNTSU5HW0BdfSIgLWd0IDAgXTsgdGhlbgogICAgcHJpbnRmICdhdXJvcy1wcnVuZTogUkVGVVNFRC4gVGhlc2UgcHJvdGVjdGVkIHBhY2thZ2VzIGFyZSBubyBsb25nZXIgaW5zdGFsbGVkOiAlc1xuJyAiJHtNSVNTSU5HWypdfSIgPiYyCiAgICBleGl0IDEKZmkKCnB5dGhvbjMgLSAiJFBMQU4iICIkUkVQT1JUIiAvdG1wL2F1cm9zLXBydW5lLWJlZm9yZS50c3YgPDwnUFknCmltcG9ydCBqc29uLCBzeXMsIHRpbWUsIHN1YnByb2Nlc3MKCnBsYW5fcGF0aCwgcmVwb3J0X3BhdGgsIGJlZm9yZV9wYXRoID0gc3lzLmFyZ3ZbMV0sIHN5cy5hcmd2WzJdLCBzeXMuYXJndlszXQpwbGFuID0ganNvbi5sb2FkKG9wZW4ocGxhbl9wYXRoKSkKCmJlZm9yZSA9IHt9CmZvciBsaW5lIGluIG9wZW4oYmVmb3JlX3BhdGgpOgogICAgcGFydHMgPSBsaW5lLnJzdHJpcCgiXG4iKS5zcGxpdCgiXHQiKQogICAgaWYgbGVuKHBhcnRzKSA9PSAzOgogICAgICAgIGJlZm9yZVtwYXJ0c1swXV0gPSAocGFydHNbMV0sIGludChwYXJ0c1syXSkpCgpyZW1vdmVkID0gMApieXRlc19yZWNsYWltZWQgPSAwCmZvciBpdGVtIGluIHBsYW5bInBsYW5uZWQiXToKICAgIG5hbWUgPSBpdGVtWyJwYWNrYWdlIl0KICAgIGlmIG5hbWUgaW4gYmVmb3JlOgogICAgICAgIHZlcnNpb24sIHNpemUgPSBiZWZvcmVbbmFtZV0KICAgICAgICBpdGVtWyJ2ZXJzaW9uIl0gPSB2ZXJzaW9uCiAgICAgICAgaXRlbVsiYnl0ZXNfcmVjbGFpbWVkIl0gPSBzaXplCiAgICAgICAgaXRlbVsib3V0Y29tZSJdID0gInJlbW92ZWQiCiAgICAgICAgcmVtb3ZlZCArPSAxCiAgICAgICAgYnl0ZXNfcmVjbGFpbWVkICs9IHNpemUKICAgIGVsc2U6CiAgICAgICAgaXRlbVsib3V0Y29tZSJdID0gImFscmVhZHktYWJzZW50IgoKIyBUaGUgY2xvc3VyZSBpcyBtb3N0IG9mIHRoZSB3b3JrLCBzbyB0aGUgaG9uZXN0IGNvdW50IGlzIGhvdyBtYW55IHBhY2thZ2VzIHRoZSBpbWFnZSBsb3N0LCBub3QgaG93CiMgbWFueSB3ZSBuYW1lZC4gQ29tcGFyZSB0aGUgZGF0YWJhc2UgdG8gdGhlIHBsYW4gcmF0aGVyIHRoYW4gdHJ1c3RpbmcgdGhlIHBsYW4uCnRyeToKICAgIHRvdGFsID0gaW50KHN1YnByb2Nlc3MucnVuKFsicnBtIiwgIi1xYSIsICItLXFmIiwgInhcbiJdLCBjYXB0dXJlX291dHB1dD1UcnVlLCB0ZXh0PVRydWUsIGNoZWNrPVRydWUpLnN0ZG91dC5jb3VudCgieCIpKQpleGNlcHQgRXhjZXB0aW9uOgogICAgdG90YWwgPSBOb25lCgpwbGFuWyJtZWFzdXJlZCJdID0gewogICAgInJlbW92ZWRfY291bnQiOiByZW1vdmVkLAogICAgImJ5dGVzX3JlY2xhaW1lZCI6IGJ5dGVzX3JlY2xhaW1lZCwKICAgICJpbWFnZV9zaXplX2J5dGVzIjogTm9uZSwKICAgICJtZWFzdXJlZF9hdCI6IHRpbWUuc3RyZnRpbWUoIiVZLSVtLSVkVCVIOiVNOiVTWiIsIHRpbWUuZ210aW1lKGludChfX2ltcG9ydF9fKCJvcyIpLmVudmlyb24uZ2V0KCJTT1VSQ0VfREFURV9FUE9DSCIsICIwIikpKSksCiAgICAicGFja2FnZXNfaW5zdGFsbGVkX2FmdGVyIjogdG90YWwsCn0KcGxhblsiZmxvb3IiXVsibWV0Il0gPSByZW1vdmVkID49IHBsYW5bImZsb29yIl1bIm11c3RfcmVtb3ZlX2F0X2xlYXN0Il0KanNvbi5kdW1wKHBsYW4sIG9wZW4ocmVwb3J0X3BhdGgsICJ3IiksIGluZGVudD0yLCBzb3J0X2tleXM9VHJ1ZSkKcHJpbnQoImF1cm9zLXBydW5lOiByZW1vdmVkICVkIHBhY2thZ2VzLCAlZCBieXRlcyIgJSAocmVtb3ZlZCwgYnl0ZXNfcmVjbGFpbWVkKSkKUFkKCiMgVGhlIGZsb29yIGlzIGFzc2VydGVkIGJ5IHRoZSBjaGVjayBtYXRyaXggYWdhaW5zdCB0aGUgTUVBU1VSRUQgY291bnQgaW5jbHVkaW5nIHRoZSBjbG9zdXJlLCBub3QKIyBoZXJlOiB0aGlzIHNjcmlwdCBzZWVzIG9ubHkgd2hhdCBpdCBuYW1lZC4gUDEtZmxvb3IgaW4gcG9zdF9jb25kaXRpb25zIGlzIHRoZSBnYXRlLgpwcmludGYgJ2F1cm9zLXBydW5lOiB3cm90ZSAlc1xuJyAiJFJFUE9SVCIK' | base64 -d > /usr/libexec/auros/auros-prune && \
+    chmod 0755 /usr/libexec/auros/auros-prune
+
+# -------------------------------------------------------------------------------------------------
+# LANGUAGE, KEYBOARD AND CLOCK
+#
+#   language   English (United Kingdom) -> en_GB.UTF-8
+#   keyboard   English (UK) -> gb
+#   timezone   Europe/London -- a name, not an offset. An offset is wrong twice a year.
+# -------------------------------------------------------------------------------------------------
+RUN printf 'LANG=%s\n' en_GB.UTF-8 > /etc/locale.conf && \
+    printf 'KEYMAP=%s\n' gb > /etc/vconsole.conf && \
+    install -d -m 0755 /etc/X11/xorg.conf.d && \
+    printf '%s' 'IyBHZW5lcmF0ZWQgYnkgYXVyb3MtcmVjaXBlIGNvbXBpbGUuIERvIG5vdCBlZGl0IGluIHRoZSBpbWFnZS4KU2VjdGlvbiAiSW5wdXRDbGFzcyIKICAgIElkZW50aWZpZXIgImF1cm9zLWtleWJvYXJkIgogICAgTWF0Y2hJc0tleWJvYXJkICJvbiIKICAgIE9wdGlvbiAiWGtiTGF5b3V0IiAiZ2IiCkVuZFNlY3Rpb24K' | base64 -d > /etc/X11/xorg.conf.d/00-auros-keyboard.conf && \
+    ln -snf ../usr/share/zoneinfo/Europe/London /etc/localtime
+
+# -------------------------------------------------------------------------------------------------
+# WHAT GOES ON: 11 applications, plus the fonts English (United Kingdom) needs.
+#
+# The fonts are not in the recipe. Choosing a language chooses them, so there is no font list
+# for anybody to get wrong, and no first-boot screen of empty boxes.
+# -------------------------------------------------------------------------------------------------
+RUN dnf -y install \
+        dolphin \
+        google-noto-sans-vf-fonts \
+        google-noto-serif-vf-fonts \
+        gwenview \
+        kate \
+        konsole \
+        kwrite && \
+    dnf -y clean all
+
+# Flathub applications are declared, not installed: flatpak-preinstall(1) materialises them on
+# the machine. Spec section 3 -- userspace apps update themselves and are explicitly not our
+# security surface. The image owns everything that can root the machine; Flatpaks own the rest.
+RUN install -d -m 0755 /etc/flatpak/preinstall.d && \
+    printf '[Flatpak Preinstall %s]\n' com.visualstudio.code > /etc/flatpak/preinstall.d/com-visualstudio-code.preinstall && \
+    printf '[Flatpak Preinstall %s]\n' io.podman_desktop.PodmanDesktop > /etc/flatpak/preinstall.d/io-podman-desktop-podmandesktop.preinstall && \
+    printf '[Flatpak Preinstall %s]\n' org.gimp.GIMP > /etc/flatpak/preinstall.d/org-gimp-gimp.preinstall && \
+    printf '[Flatpak Preinstall %s]\n' org.inkscape.Inkscape > /etc/flatpak/preinstall.d/org-inkscape-inkscape.preinstall && \
+    printf '[Flatpak Preinstall %s]\n' org.mozilla.Thunderbird > /etc/flatpak/preinstall.d/org-mozilla-thunderbird.preinstall && \
+    printf '[Flatpak Preinstall %s]\n' org.mozilla.firefox > /etc/flatpak/preinstall.d/org-mozilla-firefox.preinstall
+
+# -------------------------------------------------------------------------------------------------
+# POLICY: open
+#
+# There is exactly one base image and four policy modes. The mode is chosen in this derived
+# layer, which is the only place it can be chosen without turning four modes into four bases.
+#
+#   install applications   yes
+#   reach a terminal       yes
+#   guided first boot      no
+# -------------------------------------------------------------------------------------------------
+RUN /usr/libexec/auros/apply-policy open
+
+# -------------------------------------------------------------------------------------------------
+# THE PRUNE. This is the product.
+#
+#   8 packages named for removal, from the groups this recipe listed
+#   the floor is 40: a build that removes fewer FAILS
+#   27 packages are kept whatever anybody asked, because the machine cannot start,
+#   update or roll back without them
+#
+# auros-prune resolves the removal transaction before executing it and aborts if the closure
+# would take a protected package with it, then removes, then verifies every protected package
+# is still installed. That last step does not depend on parsing anybody's output format, which
+# is why it is the one that counts.
+# -------------------------------------------------------------------------------------------------
+RUN /usr/libexec/auros/auros-prune
+
+# -------------------------------------------------------------------------------------------------
+# Labels last, so editing one does not invalidate the cache for every step above it.
+# -------------------------------------------------------------------------------------------------
+LABEL \
+    auros.machines="1" \
+    auros.policy="open" \
+    auros.prune.floor="40" \
+    auros.prune.named="8" \
+    auros.recipe="example-workstation" \
+    auros.size-budget-gb="24" \
+    auros.source-date-epoch="1789862400" \
+    org.opencontainers.image.base.name="ghcr.io/aarohkandy/auros-base:hardened" \
+    org.opencontainers.image.source="https://github.com/aarohkandy/auros-recipes" \
+    org.opencontainers.image.title="ghcr.io/aarohkandy/auros-example-workstation" \
+    org.opencontainers.image.vendor="aarohkandy"
+
+# -------------------------------------------------------------------------------------------------
+# The structural check, run here as well as in CI. Here it fails the build at the point of damage;
+# in CI it is the gate. It is deliberately not tolerated with `|| true` -- an image that cannot be
+# a bootable host is worth nothing, and finding that out at build time beats finding it out in QEMU.
+# -------------------------------------------------------------------------------------------------
+RUN bootc container lint

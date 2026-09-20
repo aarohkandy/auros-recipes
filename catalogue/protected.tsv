@@ -32,10 +32,10 @@ skopeo	signature	Used by the update agent to inspect and verify what it is about
 dnf5	toolchain	Removing the package manager is the classic way a prune makes an image impossible to build on or repair.
 rpm	toolchain	The package database itself. Without it nothing can report what is installed, including the removal report.
 orca	accessibility	A screen reader. We do not sell an image a blind pupil cannot use, in any policy mode, at any price.
-kmag	accessibility	A screen magnifier. Same rule.
-kvkbd	accessibility	An on-screen keyboard. Same rule.
-onboard	accessibility	An on-screen keyboard. Same rule.
+kmag	accessibility	A screen magnifier. We do not sell an image a partially sighted pupil cannot read, in any policy mode, at any price.
+kvkbd	accessibility	An on-screen keyboard. It is the only input device for some users, and removing it removes their access to the machine entirely.
+onboard	accessibility	The other on-screen keyboard. Which one a user needs depends on their desktop session, so keeping one of the two is keeping neither reliably.
 espeak-ng	accessibility	The speech engine the screen reader talks through. Keeping the reader and removing its voice is a reader that says nothing.
 kernel	base	The kernel belongs to the base image. A recipe cannot name it at all; this row is what stops a closure taking it.
-kernel-core	base	As above.
-kernel-modules	base	As above.
+kernel-core	base	The kernel belongs to the base image, where one team patches it once for everybody. A recipe cannot name it; this row is what stops a closure taking it.
+kernel-modules	base	The kernel modules. Without them the machine has no disk driver, no network card and no way to be repaired.

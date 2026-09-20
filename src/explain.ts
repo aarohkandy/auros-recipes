@@ -1,0 +1,348 @@
+/**
+ * `explain` -- the recipe in plain English, for somebody who is not an engineer.
+ *
+ * This is not a debugging aid. It is the text that becomes the pull request body on an order, and
+ * the thing the person who signs off on a fleet actually reads. They are an IT coordinator at a
+ * school with a hundred and eighty laptops, not a container engineer, and in eighteen months they
+ * are the only person who can say what these machines are.
+ *
+ * Three rules it has to keep, in order of how easy they are to break:
+ *
+ *   1. SAY WHAT GETS DELETED. Subtraction is the product. If this section is a summary line and the
+ *      installation section is a list, the output is a brochure for the wrong half.
+ *
+ *   2. SAY WHAT IT WILL NOT DO, unprompted, before anyone asks. Prohibition 4.2: never claim an app
+ *      migrates when it does not. The section headed "what this will NOT do" exists because the
+ *      alternative is a customer discovering it in month two, which is where organisations are lost.
+ *
+ *   3. NEVER PRINT A NUMBER NOBODY MEASURED. Package counts here are what the recipe NAMED. The
+ *      closure and the byte totals come from the build, and this text says so rather than quietly
+ *      implying that a plan is a result.
+ */
+
+import type { Catalogue } from './catalogue.ts';
+import type { AurosConfig } from './config.ts';
+import { baseReference } from './config.ts';
+import type { PrunePlan } from './prune.ts';
+import { desktopSettings, type Recipe } from './recipe.ts';
+import { sentenceList, wrap } from './refusal.ts';
+
+export interface ExplainOptions {
+  readonly recipe: Recipe;
+  readonly plan: PrunePlan;
+  readonly catalogue: Catalogue;
+  readonly config: AurosConfig;
+  readonly fonts: ReadonlyArray<string>;
+  readonly baseDigest?: string | undefined;
+  readonly notes?: ReadonlyArray<string>;
+}
+
+function heading(text: string): string[] {
+  return ['', text.toUpperCase(), '-'.repeat(text.length)];
+}
+
+function para(text: string): string {
+  return wrap(text, '');
+}
+
+export function explain(options: ExplainOptions): string {
+  const { recipe, plan, catalogue, config, fonts } = options;
+  const desktop = desktopSettings(recipe);
+  const out: string[] = [];
+
+  out.push(`${recipe.organisation.display_name} -- ${recipe.hardware.machines} machine${recipe.hardware.machines === 1 ? '' : 's'}`);
+  out.push('='.repeat(72));
+  out.push('');
+  out.push(para(recipe.for.trim().replace(/\s+/g, ' ')));
+
+  // ---- what these machines are -----------------------------------------------------------------
+  out.push(...heading('What these machines are'));
+  out.push('');
+  out.push(`  Speaks             ${recipe.language}${recipe.other_languages?.length ? `, and a user can switch to ${sentenceList(recipe.other_languages)} without a rebuild` : ''}`);
+  out.push(`  Keyboard           ${recipe.keyboard}${recipe.second_script ? `, with ${recipe.second_script} added -- press ${recipe.switch_scripts_with} to switch` : ''}`);
+  out.push(`  Clock              ${recipe.timezone}`);
+  out.push(`  Hardware           ${sentenceList(recipe.hardware.models)}`);
+  out.push(`  Help is            ${recipe.organisation.helpdesk.label}, ${recipe.organisation.helpdesk.phone}, printed on the machine's own help screen`);
+  out.push(`  Built on           ${baseReference(config, options.baseDigest)}`);
+  out.push('');
+  out.push(
+    para(
+      'That last line is the same for every organisation we build for, and it is the reason a ' +
+        'security fix reaches these laptops as one rebuild rather than as a project. Nothing in this ' +
+        'order could change it.',
+    ),
+  );
+
+  // ---- what gets installed ---------------------------------------------------------------------
+  out.push(...heading(`What is on them: ${recipe.apps.length} application${recipe.apps.length === 1 ? '' : 's'}`));
+  out.push('');
+  for (const name of [...recipe.apps].sort()) {
+    const app = catalogue.apps.get(name);
+    out.push(`  - ${name}${app ? ` (${app.kind === 'flatpak' ? 'from Flathub, updates itself' : 'part of the image'})` : ''}`);
+  }
+  out.push('');
+  out.push(
+    para(
+      `That is the whole list. ${recipe.apps.length} application${recipe.apps.length === 1 ? '' : 's'} is what will be on the machine, not ` +
+        `${recipe.apps.length} plus whatever came with it.` +
+        (fonts.length
+          ? ` The fonts ${recipe.language} needs (${sentenceList([...fonts])}) come with the language; you did not have to ask for them and could not have got them wrong.`
+          : ''),
+    ),
+  );
+
+  // ---- what gets deleted -----------------------------------------------------------------------
+  out.push(...heading('What gets deleted'));
+  out.push('');
+  if (plan.keepOnly) {
+    out.push(para('Everything else. The recipe says "keep only the applications above", so the list you just read is also the keep list -- one list, which is why the two cannot drift apart.'));
+  } else {
+    out.push(para('The ordinary desktop stays, and these groups come out of it.'));
+  }
+  out.push('');
+  const byGroup = new Map<string, string[]>();
+  for (const item of plan.remove) {
+    const key = item.group ?? 'not one of the applications above';
+    const members = byGroup.get(key) ?? [];
+    members.push(item.ref);
+    byGroup.set(key, members);
+  }
+  for (const [group, members] of [...byGroup].sort((a, b) => a[0].localeCompare(b[0]))) {
+    out.push(`  ${group} -- ${members.length} package${members.length === 1 ? '' : 's'}`);
+    out.push(wrap(members.sort().join(', '), '      '));
+  }
+  out.push('');
+  out.push(
+    para(
+      `Those are the ${plan.remove.length} packages this recipe names by hand. The real number will be ` +
+        'larger, because removing a package releases the things only it needed, and that is most of ' +
+        `the work. The build measures the real number and this fleet's floor is ${plan.floor}: if the ` +
+        'build removes fewer than that, it fails and nothing is published. The floor exists to catch ' +
+        'the quiet case -- upstream putting something back that we took out, with no error anywhere.',
+    ),
+  );
+  out.push('');
+  out.push(para(`Every build writes a report next to the recipe listing each package that went, its version and the bytes it reclaimed. Those are measured on the built image, not estimated here.`));
+  if (plan.notPreinstalled.length > 0) {
+    out.push('');
+    out.push(para(`${sentenceList([...plan.notPreinstalled])} ${plan.notPreinstalled.length === 1 ? 'is' : 'are'} not installed in the first place -- Flathub applications only reach a machine if the recipe asks for them, so there is nothing to remove.`));
+  }
+
+  // ---- what is kept no matter what -------------------------------------------------------------
+  out.push(...heading('What stays, whatever anybody asks'));
+  out.push('');
+  out.push(
+    para(
+      `${plan.protectedKept.length} packages cannot be removed by any recipe, and they are printed here on every build so ` +
+        'that the guarantee is something you can see rather than something you have to trust. Read ' +
+        'their jobs in order and it is one sentence: reach the network, notice a new image, install ' +
+        'it, check we signed it, prove it boots, put the old one back if it does not.',
+    ),
+  );
+  out.push('');
+  const roles = new Map<string, string[]>();
+  for (const entry of plan.protectedKept) {
+    const members = roles.get(entry.role) ?? [];
+    members.push(entry.pkg);
+    roles.set(entry.role, members);
+  }
+  for (const [role, members] of [...roles].sort((a, b) => a[0].localeCompare(b[0]))) {
+    out.push(`  ${role}`);
+    out.push(wrap(members.sort().join(', '), '      '));
+  }
+  out.push('');
+  out.push(
+    para(
+      'A laptop that cannot update is not a laptop with one fewer feature. It is a laptop frozen at ' +
+        'the security state of the day it was imaged, getting worse every week, that still boots and ' +
+        'logs in and looks completely fine. That is the orphaned machine in the store cupboard, which ' +
+        'is the exact object this product exists to replace.',
+    ),
+  );
+
+  // ---- policy ----------------------------------------------------------------------------------
+  out.push(...heading(`The rules in force: ${recipe.policy}`));
+  out.push('');
+  out.push(para(POLICY_PROSE[recipe.policy]));
+  out.push('');
+  if (recipe.policy === 'kiosk' && recipe.kiosk) {
+    out.push(`  Opens                    ${recipe.kiosk.opens}`);
+    out.push(`  May reach                ${sentenceList([...recipe.kiosk.allowed_sites].sort())}`);
+    out.push(`  Session wiped after      ${recipe.kiosk.forget_session_after_minutes} minutes`);
+    out.push(`  Printing                 ${recipe.kiosk.printing ? 'yes' : 'no'}`);
+    out.push(`  USB storage              ${recipe.kiosk.usb_storage ? 'yes' : 'no'}`);
+    if (recipe.kiosk.restart_daily_at) out.push(`  Restarts daily at        ${recipe.kiosk.restart_daily_at}`);
+    out.push('');
+    out.push(
+      para(
+        'Two things about that list, both of which we would rather you heard from us. The allow-list ' +
+          'bounds which addresses the window may reach; it does not bound what somebody can do once ' +
+          'they are on one of them, because a large site brings outbound links, embedded frames and ' +
+          'file viewers with it. Do not describe this as "locked to four sites". And "no desktop" ' +
+          'means the desktop shell and the login manager are not in the image at all, which a check ' +
+          'proves against the filesystem on every build -- but shared libraries that the dependency ' +
+          'untangling will not release stay, so this image is bigger than a purpose-built minimal one ' +
+          'would be. We report the size we actually measured.',
+      ),
+    );
+  } else {
+    out.push(`  Install applications     ${desktop.can_install_apps ? 'yes' : 'no'}`);
+    out.push(`  Reach a command line     ${desktop.can_reach_a_terminal ? 'yes' : 'no'}`);
+    out.push(`  Taskbar and start menu   ${desktop.taskbar_and_start_menu ? 'yes' : 'no'}`);
+    out.push(`  Familiar folder names    ${desktop.familiar_folder_names ? 'yes' : 'no'}`);
+    out.push(`  Guided first boot        ${desktop.guided_first_boot ? 'yes' : 'no'}`);
+  }
+  out.push('');
+  out.push(`  Updates install between  ${recipe.updates?.install_between ?? '04:00-06:00 (the default)'}`);
+  out.push('');
+  out.push(
+    para(
+      'There is no setting for switching updates off, and that is deliberate. If one arrives badly, ' +
+        'the machine checks it reached a login screen and puts the previous image back by itself. One ' +
+        'previous image is kept, not several -- that is the real guarantee and we will not describe it ' +
+        'as more than it is.',
+    ),
+  );
+
+  if (recipe.theme && Object.keys(recipe.theme).length > 0) {
+    out.push(...heading('How it looks'));
+    out.push('');
+    if (recipe.theme.preset) out.push(`  Theme              ${recipe.theme.preset}`);
+    if (recipe.theme.accent) out.push(`  Accent colour      ${recipe.theme.accent}`);
+    if (recipe.theme.text_scale) out.push(`  Text size          ${recipe.theme.text_scale}x`);
+    if (recipe.theme.cursor_size) out.push(`  Pointer            ${recipe.theme.cursor_size}`);
+    out.push('');
+    out.push(
+      para(
+        'Read this one carefully, because it is the part we are not finished with. Those settings are ' +
+          'written into the image as data and the layer that applies them is not built yet, so today ' +
+          'they do not change how the machines look. We would rather say that here than let you find ' +
+          'it on the first laptop. It is on the build report too.',
+      ),
+    );
+  }
+
+  // ---- windows programs ------------------------------------------------------------------------
+  out.push(...heading('Windows programs'));
+  out.push('');
+  if (recipe.windows_apps?.enabled) {
+    out.push(para('This image includes a Windows-compatibility layer. It is offered as a capability and not as a promise, so here is exactly what somebody sat down and tested on one of these machines:'));
+    out.push('');
+    for (const entry of [...(recipe.windows_apps.tested ?? [])].sort((a, b) => a.app.localeCompare(b.app))) {
+      out.push(`  ${entry.app}`);
+      out.push(`      ${entry.result}, tested ${entry.date}`);
+      if (entry.note) out.push(wrap(entry.note, '      '));
+    }
+    if (!recipe.windows_apps.tested?.length) {
+      out.push('  Nothing has been tested yet. Until something is on this list, the honest position is');
+      out.push('  that we do not know whether your programs run.');
+    }
+    out.push('');
+    out.push(para('That list is the whole claim. Anything not on it is untested, and untested means unknown rather than fine.'));
+  } else {
+    out.push(para('Not enabled on this fleet. Windows programs will not run on these machines.'));
+  }
+
+  // ---- what it will NOT do ---------------------------------------------------------------------
+  out.push(...heading('What this will NOT do'));
+  out.push('');
+  out.push(para('Said here, in the order itself, rather than discovered in month two.'));
+  out.push('');
+  for (const line of WILL_NOT_DO) {
+    out.push(`  - ${line.split('\n')[0]!}`);
+    for (const rest of line.split('\n').slice(1)) out.push(wrap(rest, '    '));
+  }
+
+  // ---- honesty ---------------------------------------------------------------------------------
+  out.push(...heading('Things that are honestly not here yet'));
+  out.push('');
+  for (const line of NOT_YET) out.push(wrap(`  - ${line}`, '    ').replace(/^ {4}-/, '  -'));
+
+  if (options.notes && options.notes.length > 0) {
+    out.push(...heading('Disclosed on this order'));
+    out.push('');
+    for (const note of options.notes) out.push(wrap(`  - ${note}`, '    ').replace(/^ {4}-/, '  -'));
+  }
+
+  // ---- sign-off ---------------------------------------------------------------------------------
+  out.push(...heading('Sign-off'));
+  out.push('');
+  out.push(`  Approved by        ${recipe.approved_by.name}, ${recipe.approved_by.role}, on ${recipe.approved_by.date}`);
+  out.push(`  Enrolment record   ${recipe.approved_by.enrolment}`);
+  out.push(`  Size budget        ${recipe.size_budget_gb} GB -- a build larger than this fails and nothing is published`);
+  out.push('');
+  if (recipe.approved_by.enrolment === 'pending') {
+    out.push(
+      para(
+        'The enrolment record is still pending, which means this recipe will test-build but will not ' +
+          'reach a machine. The approval record lives outside this file on purpose: an approval ' +
+          'asserted inside the very file being changed proves nothing.',
+      ),
+    );
+    out.push('');
+  }
+  out.push(
+    para(
+      'This file is public, and so is every rule that decides whether it is acceptable. If we ' +
+        'disappear tomorrow, you fork this repository and rebuild this exact operating system with ' +
+        'tools you already have. That is not a courtesy; it is the thing that makes the rest of this ' +
+        'trustworthy, and it is only true because nothing above is decided by a program we keep to ' +
+        'ourselves.',
+    ),
+  );
+  out.push('');
+  return out.join('\n');
+}
+
+const POLICY_PROSE: Record<Recipe['policy'], string> = {
+  open:
+    'Open. The person using the machine is in charge of it: they can install applications, change ' +
+    'settings and reach a command line. This is the right mode for one machine belonging to somebody ' +
+    'who knows what they are doing, and the wrong one for a shared fleet.',
+  managed:
+    'Managed. The desktop works normally and the settings that would break a shared machine are held ' +
+    'by the image rather than by a policy somebody has to remember to apply. Nobody needs a command ' +
+    'line for anything this fleet promises to do.',
+  locked:
+    'Locked. Applications cannot be installed and there is no route to a command line. The desktop is ' +
+    'otherwise familiar. This is a promise about what a person at the machine can do, and it is ' +
+    'proven on a booted laptop rather than merely configured.',
+  kiosk:
+    'Kiosk. There is no desktop in this image at all -- not hidden, not disabled, not present. The ' +
+    'machine starts one window showing one page and nothing else, and the session is wiped behind ' +
+    'whoever used it.',
+};
+
+const WILL_NOT_DO: ReadonlyArray<string> = [
+  'Move your Windows programs across.\n' +
+    'Programs do not migrate. Files, browser bookmarks and history, printers and account names do. ' +
+    'Office and Adobe specifically do not, and we put them on this list rather than in a footnote.',
+  'Bring across saved passwords, cookies or payment details from Chrome or Edge.\n' +
+    'Those are locked to the machine that stored them by the browser itself. Bookmarks and history ' +
+    'come across; the rest has to go through the browser\'s own sync or an export you do before the ' +
+    'changeover, and we will walk you through it.',
+  'Touch a machine\'s system disk before your files are copied off it and verified.\n' +
+    'There is a moment where your data exists in two places and the original disk is untouched. Any ' +
+    'mismatch in the file count or a single hash aborts and changes nothing.',
+  'Roll out to some machines before others.\n' +
+    'Every machine in this fleet takes the same image. There is no way to say "these five staff-room ' +
+    'laptops go first and the other 175 follow next week", and that is a real gap rather than an ' +
+    'oversight -- see below.',
+  'Hold a package back, pin a version, or stay on an older image.\n' +
+    'If a new version breaks something for you, that is a report we want and a fix for everybody. It ' +
+    'is never a line in your file that quietly keeps you behind.',
+  'Run anything a stranger wrote in your build.\n' +
+    'A recipe cannot contain a script, a command, an extra package source or a file to drop into the ' +
+    'image. Orders arrive here as pull requests, and a format where a stranger can send us a command ' +
+    'is a format we cannot accept.',
+];
+
+const NOT_YET: ReadonlyArray<string> = [
+  'Your wireless network and your printer are not in this file, because it cannot carry a password ' +
+    'and this repository is public. Somebody sets them by hand on each machine for now. That is ' +
+    'honest and it is not good enough; the sealed enrolment bundle that fixes it is designed and not ' +
+    'built.',
+  'Staged rollout, as above. It arrives with the fleet console.',
+  'One recipe describes one uniform fleet. A computer lab and a set of classroom carts that genuinely ' +
+    'need different software are, today, two recipes.',
+];

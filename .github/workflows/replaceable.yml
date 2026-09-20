@@ -11,16 +11,27 @@
 # no toolchain of ours, no account with us — clones the public repo exactly as the website says, and
 # runs the published command verbatim. If an image does not come out, the page is wrong, and the page
 # is the trust asset.
-name: replaceable
+#
+# ── PAUSED 2026-09-20 ── DECISIONS.md D30 / BLOCKED.md B8 ──────────────────────────────────────────
+# Auros is now proprietary, all rights reserved. This job executes a promise we no longer make, so it
+# runs on manual dispatch only until the human picks a trust story.
+#
+# It is PAUSED rather than DELETED on purpose. If the answer is "customers can read their recipe" or
+# "customers get the image on cessation", the harness that proves it is this one, and rebuilding it
+# from scratch later would be waste. Whichever claim we end up making, it should be executed rather
+# than asserted.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────
+name: replaceable (paused — see BLOCKED.md B8)
 on:
   workflow_dispatch:
-  push:
-    paths: ['customers/**', '.github/workflows/replaceable.yml']
-  schedule:
+  # push and schedule triggers removed while the claim is undecided:
+  # push:
+  #   paths: ['customers/**', '.github/workflows/replaceable.yml']
+  # schedule:
     # Weekly, because this claim can be broken by a change in a completely different repo — an upstream
     # digest garbage-collected (D21), a base image renamed, a registry going private. The failure
     # would otherwise surface when a customer tried it, which is precisely when we cannot fix it.
-    - cron: '23 5 * * 3'
+  #   - cron: '23 5 * * 3'
 
 defaults:
   run:
@@ -78,18 +89,62 @@ jobs:
           fi
           echo "found=$(printf '%s\n' "${found[@]}" | jq -R . | jq -sc .)" >> $GITHUB_OUTPUT
 
+      - name: Fetch the published command FROM THE PAGE
+        id: published
+        run: |
+          # The command this job runs is not typed here. It is READ OFF THE WEBSITE, because the
+          # claim under test is "the command on the page works" and a workflow with its own copy of
+          # the command tests a different sentence. The previous version of this step grepped the
+          # page for the substrings 'podman build' and 'Containerfile' and called that verbatim; it
+          # passed for months while the page said `myschool/Containerfile` and this job built
+          # `customers/$NAME/Containerfile`. Two strings that both contain 'Containerfile' are not
+          # the same command.
+          #
+          # A fetch failure fails the job. D19: a step that cannot fail is not a check, and the
+          # earlier `exit 0` on a network blip meant the drift check had never once been required
+          # to run.
+          for attempt in 1 2 3; do
+            curl -sfL --max-time 20 -o /tmp/faq.md \
+              https://raw.githubusercontent.com/aarohkandy/auros-web/main/src/content/faq/1-if-you-disappear.md && break
+            echo "attempt $attempt failed"; sleep $((attempt * 5))
+          done
+          [ -s /tmp/faq.md ] || { echo "::error::could not read the published FAQ after 3 attempts. This job exists to run the command the website publishes; without the page it cannot do that, and passing would mean asserting nothing."; exit 1; }
+
+          # Exactly one podman build line, or we do not know which one we are defending.
+          mapfile -t CMDS < <(grep -E '^[[:space:]]*podman build ' /tmp/faq.md | sed 's/^[[:space:]]*//')
+          printf 'podman build lines on the page: %d\n' "${#CMDS[@]}"
+          printf '  %s\n' "${CMDS[@]:-<none>}"
+          if [ "${#CMDS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one 'podman build' command on faq/1-if-you-disappear.md, found ${#CMDS[@]}. Either the page changed shape or the claim moved; update this job to match whatever we now tell customers, deliberately."
+            exit 1
+          fi
+          echo "published=${CMDS[0]}" >> "$GITHUB_OUTPUT"
+
       - name: Run the published command, verbatim, for one customer
         run: |
           cd "$RUNNER_TEMP/stranger"
           # The first customer is enough to prove the mechanism; building all of them would take hours
           # and prove the same thing. Which one is deterministic, so a failure is reproducible.
           NAME=$(ls -1d customers/*/ | head -1 | xargs basename)
+
+          # The page writes `myschool` as the stand-in name. That placeholder, and the image tag, are
+          # the ONLY substitutions permitted — every other byte is the customer's byte.
+          PUBLISHED='${{ steps.published.outputs.published }}'
+          CMD=${PUBLISHED//myschool:local/$NAME:local}
+          CMD=${CMD//customers\/myschool\//customers/$NAME/}
+          echo "published : $PUBLISHED"
+          echo "running   : $CMD"
+
+          # If the substitution left a placeholder behind, the page's path shape changed and the
+          # command we are about to run is not the published one. Refuse rather than build something
+          # that happens to work.
+          case "$CMD" in *myschool*) echo "::error::'myschool' survived substitution — the published command's path shape is not the one this job knows how to localise. Do not edit this job to make it pass; work out which of the two is wrong."; exit 1 ;; esac
+
           echo "::group::$NAME/Containerfile as a customer would read it"
           cat "customers/$NAME/Containerfile"
           echo "::endgroup::"
 
-          # Verbatim from the FAQ. If this line and the FAQ ever differ, one of them is wrong.
-          podman build -t "$NAME:local" -f "customers/$NAME/Containerfile" .
+          eval "$CMD"
 
           podman images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | tee /tmp/images.txt
           grep -q "^$NAME:local" /tmp/images.txt || { echo "::error::no image came out"; exit 1; }
@@ -97,27 +152,33 @@ jobs:
           {
             echo "## Replaceability"
             echo "A container with podman and git, and nothing of ours, cloned the public repo and"
-            echo "rebuilt \`$NAME\` from the committed file."
+            echo "ran the command **as published on the website**:"
             echo ""
             echo '```'
-            grep "^$NAME:local" /tmp/images.txt
+            echo "$PUBLISHED"
             echo '```'
+            echo ""
+            grep "^$NAME:local" /tmp/images.txt
             echo ""
             echo "This is the claim on the FAQ, executed rather than asserted."
           } >> $GITHUB_STEP_SUMMARY
 
-      - name: The FAQ and this workflow must not drift
+      - name: The other page must publish the same command
         run: |
-          # The website tells customers a specific command. If someone edits the workflow to make it
-          # pass, or edits the page to say something else, this catches the divergence — otherwise the
-          # test drifts away from the claim it exists to defend and keeps passing.
-          curl -sfL -o /tmp/faq.md \
-            https://raw.githubusercontent.com/aarohkandy/auros-web/main/src/content/faq/1-if-you-disappear.md \
-            || { echo "could not fetch the FAQ — not failing the build over a network blip, but this check did not run"; exit 0; }
-          if grep -q 'podman build' /tmp/faq.md; then
-            echo "FAQ command as published:"; grep -n 'podman build' /tmp/faq.md
-            grep -q 'Containerfile' /tmp/faq.md || { echo "::error::the FAQ no longer mentions Containerfile — this test may be defending a claim that changed"; exit 1; }
-          else
-            echo "::error::the FAQ no longer contains a 'podman build' command. Either the claim moved or it was removed; this test must be updated to match whatever we now tell customers."
+          # faq/1 is what the job above executes. pages/5 repeats the command for the sceptic who
+          # reads the long version, and two copies of a command drift. Compare the exact strings.
+          for attempt in 1 2 3; do
+            curl -sfL --max-time 20 -o /tmp/replaceable.mdx \
+              https://raw.githubusercontent.com/aarohkandy/auros-web/main/src/content/pages/5-replaceable-on-purpose.mdx && break
+            sleep $((attempt * 5))
+          done
+          [ -s /tmp/replaceable.mdx ] || { echo "::error::could not read pages/5-replaceable-on-purpose.mdx"; exit 1; }
+          PUBLISHED='${{ steps.published.outputs.published }}'
+          if ! grep -Fxq "$PUBLISHED" /tmp/replaceable.mdx; then
+            echo "::error::pages/5 does not contain the exact command faq/1 publishes:"
+            echo "  faq/1  : $PUBLISHED"
+            echo "  pages/5: $(grep -E '^podman build .*Containerfile' /tmp/replaceable.mdx || echo '<no matching line>')"
+            echo "Only one of them was executed by this job. The other one is what a customer might type."
             exit 1
           fi
+          echo "both pages publish the same command, and it built."
