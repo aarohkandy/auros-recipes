@@ -57,7 +57,7 @@ function compileFleet(name: string): { text: string; digest: string | undefined;
     `customers/${name}/recipe.yaml is committed and does not validate:\n` +
       result.refusals.map((r) => `  ${r.where}: ${r.what}`).join('\n'),
   );
-  const digest = resolveBaseDigest({});
+  const digest = resolveBaseDigest(ROOT);
   return {
     text: compile({
       recipe: result.recipe!,
@@ -83,7 +83,7 @@ function compileFleet(name: string): { text: string; digest: string | undefined;
  * wrote. Nothing in these fixtures needs to be there: the only cross-file rule that cares is the one
  * checking a recipe's name against its folder, which is satisfied by naming the temporary folder.
  */
-function compileAt(recipePath: string, env: NodeJS.ProcessEnv = {}): string {
+function compileAt(recipePath: string, digest?: string): string {
   const loaded = loadRecipe(recipePath);
   const result = validateDocument(toolchain(), loaded.doc, loaded.path);
   assert.ok(
@@ -97,7 +97,7 @@ function compileAt(recipePath: string, env: NodeJS.ProcessEnv = {}): string {
     fonts: result.fonts ?? [],
     config,
     catalogue: toolchain().catalogue,
-    baseDigest: resolveBaseDigest(env),
+    baseDigest: digest,
     notes: result.notes,
   });
 }
@@ -205,14 +205,20 @@ test('every committed recipe validates, compiles, and names the base from the na
   }
 });
 
-test('with no digest supplied the FROM carries the tag, and the file SAYS that is why', () => {
-  // The state today: nothing has been built, so no digest exists. The disclosure matters more than
-  // the tag does -- an unpinned build that LOOKED pinned is how a rebuild silently stops moving.
+test('every committed Containerfile carries the committed pin, or the tag and a sentence saying why', () => {
+  // Until propagate.yml first writes .locks/base.digest no digest exists, and the disclosure matters
+  // more than the tag does -- an unpinned build that LOOKED pinned is how a rebuild silently stops
+  // moving. Once the pin is committed, every committed Containerfile must carry exactly it.
+  const pin = resolveBaseDigest(ROOT);
   for (const name of fleets()) {
     const text = readFileSync(join(CUSTOMERS, name, 'Containerfile'), 'utf8');
-    assert.match(text, new RegExp(`^ARG BASE=${escaped(config.baseImage)}:${config.baseTag}$`, 'm'));
-    assert.match(text, /base pinned by\s+tag only -- no digest was supplied to the compiler/);
-    assert.doesNotMatch(text, /base pinned by\s+\$AUROS_BASE_DIGEST/);
+    if (pin) {
+      assert.match(text, new RegExp(`^ARG BASE=${escaped(config.baseImage)}@${pin}$`, 'm'));
+      assert.match(text, /base pinned by\s+\.locks\/base\.digest, committed/);
+    } else {
+      assert.match(text, new RegExp(`^ARG BASE=${escaped(config.baseImage)}:${config.baseTag}$`, 'm'));
+      assert.match(text, /base pinned by\s+tag only -- \.locks\/base\.digest is not committed/);
+    }
   }
 });
 
@@ -227,7 +233,7 @@ test('nothing inside a customer directory can pin the base, whatever it is calle
   // abandoned machine this product exists to replace, produced by us.
   //
   // It is closed twice over, and both halves are asserted because either alone would rot: the digest
-  // comes from the environment and from nowhere else, AND a recipe folder holding a file nobody named
+  // comes from the committed .locks/base.digest and from nowhere else, AND a recipe folder holding a file nobody named
   // is refused rather than ignored. Ignoring it alone would be silent about an author plainly trying.
   const f = fixture('golden-lock-fixture');
   const attacker = `sha256:${'7'.repeat(64)}`;
@@ -239,7 +245,7 @@ test('nothing inside a customer directory can pin the base, whatever it is calle
       writeFileSync(join(f.dir, filename), `BASE_DIGEST=${attacker}\n`);
       try {
         // Half one: the resolver does not read the recipe's directory at all.
-        assert.equal(resolveBaseDigest({}), undefined, `a file called ${filename} beside the recipe pinned the build`);
+        assert.equal(resolveBaseDigest(f.dir), undefined, `a file called ${filename} beside the recipe pinned the build`);
 
         // Half two: the file is refused by name, so nobody finds out by it working.
         const result = validateDocument(toolchain(), loadRecipe(f.recipePath).doc, f.recipePath);
@@ -278,45 +284,58 @@ test('the files a recipe folder IS allowed to hold are still allowed, so the rul
   }
 });
 
-test('when the environment supplies a digest the FROM resolves to exactly it, and the header stops saying "tag only"', () => {
+test('when a digest is pinned the FROM resolves to exactly it, and the header stops saying "tag only"', () => {
   // The other direction, and the only reason the two tests above mean anything: a compiler that had
   // simply lost the ability to pin would pass both of them and pin nothing, forever.
   const digest = `sha256:${'c'.repeat(64)}`;
   const f = fixture('golden-pin-fixture');
   try {
-    const text = compileAt(f.recipePath, { AUROS_BASE_DIGEST: digest });
+    const text = compileAt(f.recipePath, digest);
     assert.match(text, new RegExp(`^ARG BASE=${escaped(config.baseImage)}@${digest}$`, 'm'));
-    assert.match(text, /base pinned by\s+\$AUROS_BASE_DIGEST, resolved from the registry by the caller/);
+    assert.match(text, /base pinned by\s+\.locks\/base\.digest, committed/);
     assert.doesNotMatch(text, new RegExp(`^ARG BASE=.*:${config.baseTag}$`, 'm'), 'the tag is in the FROM alongside the digest');
     assert.equal(text.split('\n').filter((l) => l.startsWith('ARG BASE=')).length, 1);
 
     // ...and the unpinned build of the very same recipe says the opposite, in words.
-    const unpinned = compileAt(f.recipePath, {});
-    assert.match(unpinned, /base pinned by\s+tag only -- no digest was supplied to the compiler/);
+    const unpinned = compileAt(f.recipePath);
+    assert.match(unpinned, /base pinned by\s+tag only/);
     assert.ok(!unpinned.includes(digest));
   } finally {
     f.cleanup();
   }
 });
 
-test('only a real digest pins a build, so a pin that is not one falls back to the tag rather than looking pinned', () => {
-  const good = `sha256:${'b'.repeat(64)}`;
-  assert.equal(resolveBaseDigest({ AUROS_BASE_DIGEST: good }), good);
-  for (const bad of [
-    'stable',
-    'sha256:xyz',
-    `sha256:${'b'.repeat(63)}`,
-    `sha256:${'b'.repeat(65)}`,
-    `SHA256:${'b'.repeat(64)}`,
-    `sha256:${'B'.repeat(64)}`,
-    `sha1:${'b'.repeat(40)}`,
-    ` sha256:${'b'.repeat(64)}`,
-    `sha256:${'b'.repeat(64)} `,
-    `sha256:${'b'.repeat(64)}\nAUROS_BASE_DIGEST=sha256:${'a'.repeat(64)}`,
-    'ghcr.io/somebody/else@sha256:' + 'b'.repeat(64),
-    '',
-  ]) {
-    assert.equal(resolveBaseDigest({ AUROS_BASE_DIGEST: bad }), undefined, `${JSON.stringify(bad)} was accepted as a digest`);
+test('only a real digest pins a build, and a committed pin that is not one is an error rather than a tag', () => {
+  const root = mkdtempSync(join(tmpdir(), 'auros-pin-'));
+  const pin = (text: string): string | undefined => {
+    mkdirSync(join(root, '.locks'), { recursive: true });
+    writeFileSync(join(root, '.locks', 'base.digest'), text);
+    return resolveBaseDigest(root);
+  };
+  try {
+    const good = `sha256:${'b'.repeat(64)}`;
+    assert.equal(resolveBaseDigest(join(root, 'nowhere')), undefined, 'no pin file is no pin');
+    assert.equal(pin(good), good);
+    assert.equal(pin(`${good}\n`), good);
+    for (const bad of [
+      'stable',
+      'sha256:xyz',
+      `sha256:${'b'.repeat(63)}`,
+      `sha256:${'b'.repeat(65)}`,
+      `SHA256:${'b'.repeat(64)}`,
+      `sha256:${'B'.repeat(64)}`,
+      `sha1:${'b'.repeat(40)}`,
+      ` sha256:${'b'.repeat(64)}`,
+      `sha256:${'b'.repeat(64)} `,
+      `sha256:${'b'.repeat(64)}\n\n`,
+      `sha256:${'b'.repeat(64)}\nsha256:${'a'.repeat(64)}`,
+      'ghcr.io/somebody/else@sha256:' + 'b'.repeat(64),
+      '',
+    ]) {
+      assert.throws(() => pin(bad), /base\.digest/, `${JSON.stringify(bad)} was accepted as a digest`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

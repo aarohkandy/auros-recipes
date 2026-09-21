@@ -189,7 +189,13 @@ function main(argv: string[]): number {
     }
   })();
 
-  const baseDigest = resolveBaseDigest();
+  const baseDigest = (() => {
+    try {
+      return resolveBaseDigest(root);
+    } catch (err) {
+      return fail((err as Error).message);
+    }
+  })();
 
   if (verb === 'explain') {
     process.stdout.write(

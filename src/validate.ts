@@ -535,7 +535,7 @@ function crossFileRefusals(
   // propagate.yml's staleness test (does the lockfile name the published digest?) then marked that
   // fleet permanently up to date. Never rebuilt, never patched, never noticed.
   //
-  // The digest now comes only from $AUROS_BASE_DIGEST and the lockfile lives in .locks/, which a
+  // The digest now comes only from the committed .locks/base.digest, and .locks/ is a directory a
   // pull request may not touch. This check is the other half: a recipe folder contains the recipe,
   // the generated Containerfile, the removal-floor ledger, and the logo the recipe names. A file
   // that is none of those is refused by name rather than ignored, because "the file IS the machine"

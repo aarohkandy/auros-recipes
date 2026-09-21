@@ -41,7 +41,7 @@ on:
   workflow_dispatch:
     inputs:
       recipe:       { required: true,  type: string }
-      base_digest:  { required: false, type: string, description: 'Leave empty to use the currently published base. There is deliberately no input that skips the check matrix.' }
+      base_digest:  { required: false, type: string, description: 'Leave empty to build on the committed pin, .locks/base.digest. If given, it must equal that pin. There is deliberately no input that skips the check matrix.' }
       publish:
         required: false
         type: boolean
@@ -125,6 +125,19 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
           sudo docker system prune -af --volumes >/dev/null 2>&1 || true
           df -h /
+
+      # THE PIN IS A COMMITTED FILE, NOT THIS INPUT (SYSTEM-REVIEW §2.11). compile.ts reads
+      # .locks/base.digest from the checkout, so the Containerfile below is a pure function of committed
+      # files and the D28 drift check stays meaningful. base_digest is only the caller's claim about
+      # which pin it expects; a checkout that does not carry it would build and lock the wrong base.
+      - name: The caller's base digest is the committed pin
+        run: |
+          PIN=$(cat .locks/base.digest 2>/dev/null || true)
+          if [ -n "${BASE_DIGEST}" ] && [ "${BASE_DIGEST}" != "${PIN}" ]; then
+            echo "::error::the caller resolved ${BASE_DIGEST} but .locks/base.digest in this checkout pins '${PIN}'. propagate.yml re-pins and commits first; the next poll builds from that commit."
+            exit 1
+          fi
+          echo "base pin: ${PIN:-none -- tag only}"
 
       - name: Compile, and refuse to proceed if the committed Containerfile has drifted
         id: build
@@ -411,15 +424,19 @@ jobs:
       - name: Record the base digest this recipe was built against
         if: inputs.publish && github.ref == 'refs/heads/main'
         run: |
+          # The digest the BUILT Containerfile's FROM names -- not the caller's input, which the
+          # build never read (SYSTEM-REVIEW §2.11). Empty for a tag-only build, which leaves the fleet
+          # stale, and that is true.
+          USED=$(sed -n 's/^ARG BASE=.*@\(sha256:[0-9a-f]\{64\}\)$/\1/p' "customers/${RECIPE}/Containerfile")
           mkdir -p .locks
           printf 'BASE_DIGEST=%s\nBUILT_AT=%s\nRUN_URL=%s\n' \
-            "${BASE_DIGEST}" "$(date -u +%FT%TZ)" \
+            "${USED}" "$(date -u +%FT%TZ)" \
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             > ".locks/${RECIPE}.lock"
           git config user.name  'auros-ci'
           git config user.email 'ci@auros.invalid'
           git add ".locks/${RECIPE}.lock" "customers/${RECIPE}/Containerfile"
-          git diff --cached --quiet || git commit -m "ci(${RECIPE}): built against ${BASE_DIGEST}"
+          git diff --cached --quiet || git commit -m "ci(${RECIPE}): built against ${USED:-the tag}"
           git push || echo "push failed — the poll will retry, so this is not fatal"
 
       - uses: actions/upload-artifact@v4

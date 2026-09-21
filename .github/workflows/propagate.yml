@@ -54,6 +54,7 @@ jobs:
       stale: ${{ steps.scan.outputs.stale }}
       base_digest: ${{ steps.scan.outputs.base_digest }}
       reason: ${{ steps.scan.outputs.reason }}
+      repin: ${{ steps.scan.outputs.repin }}
     steps:
       - uses: actions/checkout@v4
       # The namespace (D1). scripts/resolve-base.mjs reads the base reference from auros.config.json
@@ -81,6 +82,16 @@ jobs:
           [ -n "$DIGEST" ] || { echo "resolve-base printed no digest: $RESOLVED"; exit 1; }
           echo "published base digest: $DIGEST"
           echo "base_digest=$DIGEST" >> $GITHUB_OUTPUT
+
+          # The pin every Containerfile is compiled against is a COMMITTED file (SYSTEM-REVIEW §2.11).
+          # When it is not the published digest, the repin job below commits the new pin together with
+          # the regenerated Containerfiles, and nothing is built this run: a build from this checkout
+          # would be on the old pin. The next poll builds from the repinned commit.
+          if [ "$(cat .locks/base.digest 2>/dev/null || true)" != "$DIGEST" ]; then
+            echo "base moved to $DIGEST — repinning; rebuilds follow on the next poll"
+            echo "repin=true" >> $GITHUB_OUTPUT
+            echo "stale=[]" >> $GITHUB_OUTPUT; echo "reason=repin" >> $GITHUB_OUTPUT; exit 0
+          fi
 
           # A recipe is stale when its lockfile does not name the digest currently published.
           # Missing lockfile counts as stale: a recipe that has never been built is not up to date.
@@ -122,3 +133,34 @@ jobs:
       recipe: ${{ matrix.recipe }}
       base_digest: ${{ needs.detect.outputs.base_digest }}
     secrets: inherit
+
+  # ONE COMMIT: the new pin and every Containerfile compiled against it. Committing them together is
+  # what keeps both promises: the committed Containerfile carries a digest (a customer rebuilding
+  # without us gets the exact base), and CI's D28 drift check regenerates the same bytes from the
+  # same committed files. A failed push is red on purpose; the next poll retries from scratch.
+  repin:
+    needs: detect
+    if: needs.detect.outputs.repin == 'true'
+    runs-on: ubuntu-24.04     # pinned (D23)
+    env:
+      DIGEST: ${{ needs.detect.outputs.base_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros, path: .auros-meta }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - name: Pin the published base and regenerate every Containerfile
+        run: |
+          mkdir -p .locks
+          printf '%s\n' "$DIGEST" > .locks/base.digest
+          # compile refuses a pin that is not exactly one digest, so a bad value stops here.
+          for r in customers/*/recipe.yaml; do
+            node dist/cli.js compile "$r" -o "$(dirname "$r")/Containerfile"
+          done
+          git config user.name  'auros-ci'
+          git config user.email 'ci@auros.invalid'
+          git add .locks/base.digest customers/*/Containerfile
+          git commit -m "base: pin ${DIGEST}, regenerate every Containerfile"
+          git push

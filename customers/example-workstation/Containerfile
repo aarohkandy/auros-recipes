@@ -7,7 +7,7 @@
 #
 #   recipe            example-workstation
 #   base image        ghcr.io/aarohkandy/auros-base:hardened
-#   base pinned by    tag only -- no digest was supplied to the compiler, so none is claimed here
+#   base pinned by    tag only -- .locks/base.digest is not committed, so no digest is claimed here
 #   namespace from    auros.config.json (the one file that holds it)
 #   SOURCE_DATE_EPOCH 1789862400 (midnight UTC on 2026-09-20, the recipe's approval date)
 #   architecture      x86_64
@@ -24,9 +24,9 @@
 # built from the handed-over base build files, and this file has to point at that copy. Without
 # it the handover would contain a command that cannot work, which is worse than no instruction.
 #
-# The digest pin is for this build only. When the base moves, propagation notices this recipe is
-# stale and rebuilds it against the new digest. A pin that lived in the recipe would freeze this
-# organisation off the rebuild that carries the next security fix.
+# The digest pin is one committed file shared by every fleet. When the base moves, propagation
+# rewrites it, regenerates this file in the same commit, and rebuilds. A pin that lived in the
+# recipe would freeze this organisation off the rebuild that carries the next security fix.
 #
 # NO BUILD CONTEXT IS REQUIRED. Everything this file installs it carries inline. `podman build`
 # against an empty directory produces the image. If Auros ceases operating, the customer receives
