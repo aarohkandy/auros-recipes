@@ -49,23 +49,36 @@ permissions:
 
 jobs:
   detect:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04     # D23: ubuntu-latest moves to 26.04 from 2026-10-19
     outputs:
       stale: ${{ steps.scan.outputs.stale }}
       base_digest: ${{ steps.scan.outputs.base_digest }}
       reason: ${{ steps.scan.outputs.reason }}
     steps:
       - uses: actions/checkout@v4
+      # The namespace (D1). scripts/resolve-base.mjs reads the base reference from auros.config.json
+      # via src/config.ts, which looks in .auros-meta/ by name — no image name is written here.
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros, path: .auros-meta }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
       - name: Resolve the published base digest
         id: scan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          BASE_REF="ghcr.io/aarohkandy/auros-base:hardened"
-          # skopeo is preinstalled on ubuntu-latest (measured: 1.13.3).
-          if ! DIGEST=$(skopeo inspect --no-tags "docker://$BASE_REF" 2>/dev/null | jq -r .Digest); then
-            echo "base not published yet — nothing to propagate"
+          # Fails closed (SYSTEM-REVIEW §2.5). The ONLY green failure is the registry saying "manifest
+          # unknown" to an authenticated request; auth errors, outages, rate limits and a missing
+          # skopeo exit non-zero here and turn this run red. Branches are tested in
+          # test/resolve-base.test.ts.
+          RESOLVED=$(node scripts/resolve-base.mjs)
+          if [ "$RESOLVED" = "status=not-published" ]; then
+            echo "base not published yet (registry: manifest unknown) — nothing to propagate"
             echo "stale=[]" >> $GITHUB_OUTPUT; echo "base_digest=" >> $GITHUB_OUTPUT
             echo "reason=base-not-published" >> $GITHUB_OUTPUT; exit 0
           fi
+          DIGEST=$(printf '%s\n' "$RESOLVED" | sed -n 's/^digest=//p')
+          [ -n "$DIGEST" ] || { echo "resolve-base printed no digest: $RESOLVED"; exit 1; }
           echo "published base digest: $DIGEST"
           echo "base_digest=$DIGEST" >> $GITHUB_OUTPUT
 
