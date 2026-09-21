@@ -38,7 +38,24 @@ export function compileSchema(repoRoot: string): CompiledSchema {
   const schema = JSON.parse(
     readFileSync(join(repoRoot, 'schema', 'recipe.schema.json'), 'utf8'),
   ) as Record<string, unknown>;
-  const ajv = new Ajv2020({ allErrors: true, strict: false, allowUnionTypes: true });
+  // `strictSchema: true` is the one option in here that is a SECURITY control rather than ergonomics.
+  //
+  // Ajv's default under `strict: false` is to IGNORE a keyword it does not recognise. A rule in
+  // recipe.schema.json is therefore one typo away from not existing: rename `pattern` to `patern` on
+  // `properties.name` and this validator compiles the schema without a word and returns ZERO errors
+  // for `name: "../../../etc"` — the rule that keeps a customer name out of a filesystem path is
+  // simply gone, and every test that does not happen to exercise that exact string still passes.
+  //
+  // The Worker's own evaluator (auros-web/worker/lib/jsonschema.js) already fails closed on an
+  // unknown keyword and says why: "a validator that silently skips keywords it has not heard of gets
+  // weaker every time somebody edits the schema, and gets weaker invisibly." That was true of THIS
+  // validator, which is the one that gates the merge. `strictSchema` makes an unknown keyword a
+  // compile error here too, so the two sides fail the same way.
+  //
+  // Not `strict: true`: that also turns on `strictRequired`, which this schema legitimately trips
+  // (`$defs` branches that require a property declared in a sibling `if`). Narrow beats broad — the
+  // broad version refuses our own schema, which is how a strict flag gets turned back off.
+  const ajv = new Ajv2020({ allErrors: true, strict: false, strictSchema: true, allowUnionTypes: true });
   // The only format the schema uses. Declared here rather than pulling in ajv-formats: one format,
   // already backed by a pattern in the schema, is not worth a dependency in a toolchain whose whole
   // claim is that you can run it yourself.
