@@ -26,7 +26,7 @@
 #                    no podman, no base image. It runs first because a difference that is already
 #                    wrong on paper is not worth an hour of QEMU.
 #   2. build         three images from ONE base, with `--build-arg BASE=<input>` — the single
-#                    documented override, the same one the replaceability page hands a customer.
+#                    documented override, the same one a wind-down handover (D31) relies on.
 #   3. differ        the part that needed the base: `rpm -qa` out of each built image, compared to
 #                    each other AND to the removal plan the compiler wrote. This is where a prune
 #                    that was correct in the plan and wrong in the image shows up. Nothing before
@@ -121,8 +121,8 @@ jobs:
       - name: Build from the committed Containerfile, against the base this run was given
         run: |
           # The COMMITTED file, not a freshly compiled one. The compile job already proved they are
-          # the same, and building the committed artifact is the command the replaceability page
-          # gives a customer — so this run exercises the promise rather than a private path.
+          # the same, and building the committed artifact is the command a wind-down handover
+          # (D31) rests on — so this run exercises that rather than a private path.
           #
           # --build-arg BASE is the one override that exists, and it is deliberately not reachable
           # from recipe.yaml: nothing a customer can write puts their fleet on a different

@@ -631,3 +631,63 @@ test('a Flatpak in the removal set is reported as not-preinstalled, never handed
     assert.ok(report.not_preinstalled.includes(ref), `'${ref}' is missing from the report's not_preinstalled list`);
   }
 });
+
+/**
+ * THE JOIN. The removal report is written here and read by auros-base/matrix/run/lib/analyze.mjs
+ * (check S5). The two halves were written separately and never run against each other, so S5 read
+ * `packages` while this repository wrote `planned` and failed every recipe build (SYSTEM-REVIEW
+ * §2.19). This runs the REAL runner's report through the REAL analyzer. auros-base is found at
+ * $AUROS_BASE_DIR, ./.auros-base (where CI checks it out) or ../auros-base; on CI its absence fails.
+ */
+function aurosBaseAnalyzer(): string | null {
+  for (const dir of [process.env['AUROS_BASE_DIR'], join(ROOT, '.auros-base'), join(ROOT, '..', 'auros-base')]) {
+    if (dir && existsSync(join(dir, 'matrix', 'run', 'lib', 'analyze.mjs'))) return join(dir, 'matrix', 'run', 'lib', 'analyze.mjs');
+  }
+  return null;
+}
+const ANALYZE = aurosBaseAnalyzer();
+
+test('the matrix S5 check accepts the report the real prune runner writes', { skip: BASH ? false : 'no bash with mapfile here' }, () => {
+  if (!ANALYZE) {
+    assert.equal(process.env['CI'], undefined, 'CI has no auros-base checkout, so the S5 contract test did not run');
+    console.log('# SKIPPED (local): no auros-base checkout found; set AUROS_BASE_DIR to run the S5 contract test.');
+    return;
+  }
+  const { json, planned, guarded } = schoolReport();
+  const alreadyGone = planned[0]!;
+  const before = [...planned.filter((p) => p !== alreadyGone), ...guarded, 'something-else'];
+  const r = runPruneRunner(json, { installed: before, resolve: BENIGN_RESOLVE });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(r.report, 'no removal-report.json was written');
+
+  const dir = mkdtempSync(join(tmpdir(), 'auros-s5-'));
+  try {
+    const reportPath = '/usr/share/auros/removal-report.json';
+    // The probe's output format (auros-base matrix/run/guest/image-probe.sh), for the pruned image.
+    const probe = [
+      'PROBE_OK=1',
+      `REMOVAL_REPORT_PATH=${reportPath}`,
+      `REMOVAL_REPORT_B64=${Buffer.from(JSON.stringify(r.report)).toString('base64')}`,
+      '---RPM-NAMES---',
+      ...r.installedAfter.map((p) => `${p}\t4096`),
+      '---END---',
+    ].join('\n');
+    writeFileSync(join(dir, 'probe.txt'), `${probe}\n`);
+    // The image the runner started from, at the size the stub rpm reports.
+    writeFileSync(join(dir, 'upstream.tsv'), `${before.map((p) => `${p}\t4096`).join('\n')}\n`);
+    const out = join(dir, 'checks.jsonl');
+    const a = spawnSync(process.execPath, [ANALYZE, '--probe', join(dir, 'probe.txt'), '--out', out,
+      '--recipe', 'example-school', '--policy', 'open', '--upstream-rpms', join(dir, 'upstream.tsv')], { encoding: 'utf8' });
+    assert.equal(a.status, 0, `analyze.mjs crashed:\n${a.stdout}${a.stderr}`);
+    const checks = new Map(readFileSync(out, 'utf8').trim().split('\n').map((l) => {
+      const c = JSON.parse(l) as { id: string; status: string; detail: string };
+      return [c.id, c] as const;
+    }));
+    for (const id of ['S3', 'S5']) {
+      assert.equal(checks.get(id)?.status, 'pass', `${id}: ${checks.get(id)?.detail}`);
+    }
+    assert.match(checks.get('S5')!.detail, new RegExp(`^${planned.length - 1} entries`), 'S5 counted an already-absent package as removed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

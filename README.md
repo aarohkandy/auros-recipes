@@ -36,8 +36,7 @@ pnpm test
 ```
 
 Node 22.18 or newer, because the tests are TypeScript run directly by `node --test`. Two runtime
-dependencies — `ajv` and a YAML parser — and nothing else, on purpose: a toolchain you cannot
-install is a toolchain that does not make us replaceable.
+dependencies — `ajv` and a YAML parser — and nothing else, on purpose.
 
 ```
 node dist/cli.js validate customers/example-school/recipe.yaml
@@ -101,20 +100,23 @@ it is worth stating precisely rather than warmly:
   fleet alive.
 
 The `Containerfile` beside each recipe is committed and carries everything it installs inline, so it
-needs no build context and no part of this toolchain:
+needs no build context and no part of this toolchain. It is the centre of that handover: on one Linux
+machine with `podman`, the rebuild is one command.
 
 ```
 podman build -f customers/<your-fleet>/Containerfile -t my-os .
 ```
 
-That file being committed is what makes the commitment above something that can be executed rather
-than promised. `.github/workflows/replaceable.yml` is paused until there is a handover artefact to
-execute it against — when there is, it gets run rather than asserted.
+That file being committed (`DECISIONS.md` D28) is what makes the commitment above something that can
+be executed rather than promised. **Nothing here has been executed end to end yet.**
+`.github/workflows/replaceable.yml` is paused until there is a handover artefact to execute it
+against — when there is, it gets run rather than asserted.
 
-### If our registry is gone too
+### The base, in a handover
 
-The `Containerfile` starts from our published base image. If that has disappeared, build the base
-yourself from its own public repository and point at your copy:
+The `Containerfile` starts from our published base image. The handover includes the base
+Containerfile and build scripts, so if our registry is gone too, the base is built from those and the
+recipe pointed at it:
 
 ```
 podman build --build-arg BASE=localhost/my-auros-base:hardened \
@@ -125,7 +127,7 @@ podman build --build-arg BASE=localhost/my-auros-base:hardened \
 `recipe.yaml` — the validator refuses a recipe that names a base at all, so no fleet can end up on a
 different foundation from another by accident or by asking nicely.
 
-### If you want to change something
+### Changing a recipe
 
 Edit `recipe.yaml`, then regenerate:
 
@@ -135,8 +137,8 @@ node dist/cli.js validate customers/<your-fleet>/recipe.yaml
 node dist/cli.js compile  customers/<your-fleet>/recipe.yaml -o customers/<your-fleet>/Containerfile
 ```
 
-You will need `auros.config.json` for that step — clone the control repository next to this one, or
-copy the file and change the namespace to your own, which is the point of it being one file.
+You will need `auros.config.json` for that step, from the control repository checked out next to
+this one.
 
 If you would rather not install anything, check your file with the tools you probably already have:
 
@@ -149,7 +151,7 @@ python3 schema/refusals.test.py
 Those two programs — Python with `jsonschema`, and ours with `ajv` — read the same
 `recipe.schema.json` and nothing else, and `test/parity.test.ts` asserts they return the same verdict
 on every case in the refusal table. **If they ever disagreed it would mean one of them knows a rule
-the file does not carry, which is the one thing that would quietly make us unreplaceable.**
+the file does not carry, and the file would no longer be the whole of what a recipe means.**
 
 ---
 

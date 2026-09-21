@@ -14,7 +14,8 @@
  *   3. upwards from here        the ordinary local layout, where both repos sit side by side.
  *
  * If none of those finds it, the error says so in words rather than failing later with a FROM line
- * that reads `undefined`. README.md section "Rebuilding without us" has the clone command.
+ * that reads `undefined`. README.md section "Changing a recipe"
+ * says where it comes from.
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -45,7 +46,7 @@ export class ConfigNotFound extends Error {
         `Looked for it in $AUROS_CONFIG, in .auros-meta/, and in every directory above\n` +
         `${startedFrom}.\n\n` +
         `It lives in the Auros control repository. Clone that next to this one, or point\n` +
-        `$AUROS_CONFIG at the file directly. See README.md, "Rebuilding without us".`,
+        `$AUROS_CONFIG at the file directly. See README.md, "Changing a recipe".`,
     );
     this.name = 'ConfigNotFound';
   }

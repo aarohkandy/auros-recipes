@@ -50,6 +50,10 @@ jobs:
       # .auros-meta/ — so checking it out here is what makes the scratch copy shaped like a real one.
       - uses: actions/checkout@v4
         with: { repository: aarohkandy/auros, path: .auros-meta }
+      # test/prune.test.ts runs the prune runner's real report through auros-base's S5 analyzer, and
+      # fails on CI when this checkout is missing rather than skipping.
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros-base, path: .auros-base }
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: corepack enable && pnpm install --frozen-lockfile

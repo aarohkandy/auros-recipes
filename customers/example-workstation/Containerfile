@@ -20,17 +20,18 @@
 # THE ONE OVERRIDE, AND WHY IT EXISTS. `--build-arg BASE=...` swaps the foundation for one local
 # build. It is not reachable from recipe.yaml -- the validator refuses a recipe that names a base
 # at all -- so it cannot put one fleet on a different foundation from another. It exists for the
-# single case the replaceability page documents: our registry is gone, you have built the base
-# yourself from its public repository, and you need this file to point at your copy. Without it
-# that instruction would be a command that cannot work, which is worse than no instruction.
+# single case of a wind-down handover (DECISIONS.md D31): our registry is gone, the base has been
+# built from the handed-over base build files, and this file has to point at that copy. Without
+# it the handover would contain a command that cannot work, which is worse than no instruction.
 #
 # The digest pin is for this build only. When the base moves, propagation notices this recipe is
 # stale and rebuilds it against the new digest. A pin that lived in the recipe would freeze this
 # organisation off the rebuild that carries the next security fix.
 #
 # NO BUILD CONTEXT IS REQUIRED. Everything this file installs it carries inline. `podman build`
-# against an empty directory produces the image. That is what makes "if we vanish, you rebuild
-# your exact operating system from the file" something you can test rather than something we say.
+# against an empty directory produces the image. If Auros ceases operating, the customer receives
+# this file with the base build files, and it can be executed rather than taken on trust. That
+# is a handover term, not a licence to build or redistribute it.
 #
 # WHO THESE MACHINES ARE FOR, in the words of the person who ordered them:
 #

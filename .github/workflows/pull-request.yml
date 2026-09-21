@@ -41,6 +41,10 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/checkout@v4
         with: { repository: aarohkandy/auros, path: .auros-meta }
+      # test/prune.test.ts runs the prune runner's real report through auros-base's S5 analyzer, and
+      # fails on CI when this checkout is missing rather than skipping.
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros-base, path: .auros-base }
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: corepack enable && pnpm install --frozen-lockfile
@@ -69,7 +73,7 @@ jobs:
 
       # 4. Containerfile drift, the palette of golden files, the refusal table, the parity of the
       #    two validators. golden.test.ts asserts that every committed Containerfile is exactly what
-      #    the compiler produces, which is the claim the replaceability page makes to a customer.
+      #    the compiler produces, which is what a wind-down handover (D31) rests on.
       - name: Tests
         run: |
           python3 -m pip install --quiet jsonschema pyyaml

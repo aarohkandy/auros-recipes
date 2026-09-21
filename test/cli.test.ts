@@ -149,7 +149,7 @@ test('a missing namespace file is an error in words, not a FROM line reading und
     (err: unknown) => {
       assert.ok(err instanceof ConfigNotFound);
       assert.match((err as Error).message, /will not guess at a namespace/);
-      assert.match((err as Error).message, /Rebuilding without us/);
+      assert.match((err as Error).message, /Changing a recipe/);
       return true;
     },
   );

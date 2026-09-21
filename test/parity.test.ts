@@ -1,9 +1,8 @@
 /**
  * Two validators, one set of rules.
  *
- * schema/README.md section 1 makes a promise the whole company rests on: "if we disappear, you
- * validate and rebuild your own operating system with tools you already have, and you get the same
- * answers we would have given you."
+ * schema/README.md section 1 says a recipe can be checked with tools you already have, with the
+ * same answers we would give.
  *
  * That is only true if the rules live in a data file rather than in a program. This repository ships
  * two independent readers of that file -- Python + jsonschema, which is what the README tells a

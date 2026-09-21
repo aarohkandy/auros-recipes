@@ -7,10 +7,9 @@ Run it the same way CI does:
     python3 schema/validate.py customers/<fleet>/recipe.yaml
     python3 schema/validate.py --all
 
-This file is in the public repository on purpose. Every rule that decides whether a recipe is
-acceptable is either in recipe.schema.json or in here; there is no additional private program that
-knows extra rules. That is what makes "if we vanish you rebuild your exact OS from the file" a claim
-you can test rather than one we assert.
+Every rule that decides whether a recipe is acceptable is either in recipe.schema.json or in here;
+there is no additional private program that knows extra rules. So the verdict this file gives is the
+verdict CI gives, and that is something you can test rather than something we assert.
 
 Rules that a JSON Schema cannot express live in check_cross_file() below, clearly marked, so the
 boundary is visible instead of implied.

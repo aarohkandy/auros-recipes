@@ -1307,7 +1307,7 @@
       },
       "secrets": {
         "title": "No credential of any kind belongs in this file",
-        "description": "This repository is public on purpose — it is how an organisation keeps its exact operating system if we disappear. Anything written here is published to the world by design, so there is no field for a password, a network key, a token or a licence. This is a real gap and we are not pretending otherwise: a school fleet needs a wireless network and a printer on day one, and the way that arrives is a sealed enrolment bundle handed over separately, never a line in here.",
+        "description": "This repository is public. Anything written here is published to the world, so there is no field for a password, a network key, a token or a licence. This is a real gap and we are not pretending otherwise: a school fleet needs a wireless network and a printer on day one, and the way that arrives is a sealed enrolment bundle handed over separately, never a line in here.",
         "not": {
           "anyOf": [
             {

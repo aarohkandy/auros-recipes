@@ -8,10 +8,12 @@ This file is written for the person who has to maintain a fleet and has never wr
 need to understand containers, package managers or Linux to fill it in. You do need to read it, because
 in eighteen months it is the only thing that explains what these machines are.
 
-Everything below is enforced by `schema/recipe.schema.json`, a strict JSON Schema. It is in this public
-repository on purpose: if we disappear, you validate and rebuild your own operating system with tools you
-already have, and you get the same answers we would have given you. That is the point of the whole
-company and it is only true if the rules live in a file you can run, not in a program only we ship.
+Everything below is enforced by `schema/recipe.schema.json`, a strict JSON Schema. It is readable in
+this repository, and there is no second, private program that knows extra rules, so you can check a
+recipe with tools you already have and get the same answers we would give you. Readable is not a licence (see `LICENSE`).
+What a customer is promised is `DECISIONS.md` D31: if Auros ceases operating, each customer receives
+the build files for their own image — their recipe, the base Containerfile and the build scripts — so
+they or anyone they hire can keep patching it.
 
 ---
 
@@ -272,9 +274,8 @@ rule.
 
 ### It cannot carry a secret
 
-No password, no network key, no token. This repository is public by design — it is how you keep your
-exact operating system if we vanish — so anything written here is published to the world. See §4: this
-is a real gap and we are not dressing it up.
+No password, no network key, no token. This repository is public, so anything written here is
+published to the world. See §4: this is a real gap and we are not dressing it up.
 
 ### It cannot make a general claim
 
@@ -370,8 +371,8 @@ python3 schema/refusals.test.py
 
 The same validator runs on every pull request, from the same pinned version, against the same schema
 file in this repository. There is no additional private program that knows extra rules. That is what
-makes the promise in §1 — rebuild your own operating system without us — something you can test rather
-than something we assert.
+makes §1's statement — the same answers we would give you — something you can test rather than
+something we assert.
 
 Some rules cannot be expressed in a schema and live in the validator: your `name` matching its folder and
 being unique, your models joining to `hardware/compat.tsv`, your application names existing in the

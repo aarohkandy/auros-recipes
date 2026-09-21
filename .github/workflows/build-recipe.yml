@@ -133,10 +133,9 @@ jobs:
           C="customers/${RECIPE}/Containerfile"
           node dist/cli.js compile "$R" > /tmp/Containerfile.fresh
 
-          # D28. The Containerfile is COMMITTED next to the recipe, because the FAQ tells a customer
-          # they can rebuild their own operating system with nothing but podman:
-          #     git clone .../auros-recipes && podman build -f <name>/Containerfile .
-          # That command backs the claim we advertise hardest — if we vanish, you rebuild without us —
+          # D28. The Containerfile is COMMITTED next to the recipe, because it is the centre of the
+          # build files a customer receives if Auros ceases operating (D31):
+          #     podman build -f customers/<name>/Containerfile .
           # so it has to actually work, with no Node and no toolchain of ours.
           #
           # A generated file committed to a repo drifts. So CI regenerates it and fails on any

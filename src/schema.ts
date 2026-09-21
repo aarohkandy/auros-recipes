@@ -10,10 +10,9 @@
  * teaches nobody anything. This module walks from the failing keyword back up to the nearest
  * sentence an author wrote and prints that instead.
  *
- * `schema/validate.py` does the same thing in Python. The two exist because the promise in
- * schema/README.md section 1 -- "if we disappear you validate and rebuild your own operating
- * system with tools you already have" -- is only true if the rules live in a data file that more
- * than one program can read. test/parity.test.ts asserts they agree.
+ * `schema/validate.py` does the same thing in Python. The two exist because schema/README.md section 1
+ * says you can check a recipe with tools you already have and get the same answers we would give
+ * you, which is only true if the rules live in a data file that more than one program can read. test/parity.test.ts asserts they agree.
  */
 
 import { readFileSync } from 'node:fs';
@@ -57,8 +56,7 @@ export function compileSchema(repoRoot: string): CompiledSchema {
   // broad version refuses our own schema, which is how a strict flag gets turned back off.
   const ajv = new Ajv2020({ allErrors: true, strict: false, strictSchema: true, allowUnionTypes: true });
   // The only format the schema uses. Declared here rather than pulling in ajv-formats: one format,
-  // already backed by a pattern in the schema, is not worth a dependency in a toolchain whose whole
-  // claim is that you can run it yourself.
+  // already backed by a pattern in the schema, is not worth a dependency.
   ajv.addFormat('date', /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/);
   return { validate: ajv.compile(schema), schema, knownKeys: collectKnownKeys(schema) };
 }

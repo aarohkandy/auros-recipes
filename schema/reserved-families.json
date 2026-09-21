@@ -213,7 +213,7 @@
     {
       "id": "secrets",
       "title": "No credential of any kind belongs in this file",
-      "why": "This repository is public by design -- it is how a customer keeps their exact operating system if we vanish -- so anything written here is published to the world, immediately and irrevocably. A wireless key in a git history is a wireless key in a git history forever. This is also a real gap rather than a complete answer: your laptops do need one wireless network and one printer on day one, and the intended answer is a sealed enrolment bundle handed over separately and referenced by approved_by.enrolment. That is designed and not built. See schema/README.md section 4.",
+      "why": "This repository is public, so anything written here is published to the world, immediately and irrevocably. A wireless key in a git history is a wireless key in a git history forever. This is also a real gap rather than a complete answer: your laptops do need one wireless network and one printer on day one, and the intended answer is a sealed enrolment bundle handed over separately and referenced by approved_by.enrolment. That is designed and not built. See schema/README.md section 4.",
       "exact": [
         "password",
         "passphrase",
