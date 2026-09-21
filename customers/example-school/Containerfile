@@ -169,6 +169,14 @@ RUN printf '[Flatpak Preinstall com.usebottles.bottles]\n' > /etc/flatpak/preins
 RUN /usr/libexec/auros/apply-policy managed
 
 # -------------------------------------------------------------------------------------------------
+# DESKTOP LAYOUT: browser-first
+#
+# Every new user starts with this layout instead of the Windows one. The helper refuses any
+# other word and any layout this base does not ship, so a mismatch fails the build here.
+# -------------------------------------------------------------------------------------------------
+RUN /usr/libexec/auros/set-desktop-layout browser-first
+
+# -------------------------------------------------------------------------------------------------
 # THE PRUNE. This is the product.
 #
 #   52 packages named for removal, from "keep only the applications above"

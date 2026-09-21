@@ -24,7 +24,7 @@ import type { Catalogue } from './catalogue.ts';
 import type { AurosConfig } from './config.ts';
 import { baseReference } from './config.ts';
 import type { PrunePlan } from './prune.ts';
-import { desktopSettings, type Recipe } from './recipe.ts';
+import { desktopSettings, type Layout, type Recipe } from './recipe.ts';
 import { sentenceList, wrap } from './refusal.ts';
 // One definition of the cadence, shared with the disclosure note validate.ts writes, because two
 // copies of a measured number is how one of them goes stale.
@@ -65,6 +65,13 @@ export function field(label: string, value: string, width = LABEL_WIDTH): string
   const wrapped = wrap(value, indent);
   return `  ${label.padEnd(width)}${wrapped.slice(indent.length)}`;
 }
+
+const LAYOUT_WORDS: Record<Layout, string> = {
+  windows: 'windows -- a taskbar along the bottom with a start menu (the default)',
+  'browser-first': 'browser-first -- the launcher at the left and pinned apps in the middle, like a school Chromebook',
+  simple: 'simple -- one tall bar with three big buttons',
+  mac: 'mac -- a bar along the top and a dock of apps along the bottom',
+};
 
 export function explain(options: ExplainOptions): string {
   const { recipe, plan, catalogue, config, fonts } = options;
@@ -211,6 +218,7 @@ export function explain(options: ExplainOptions): string {
     out.push(field('Install applications', `${desktop.can_install_apps ? 'yes' : 'no'}`, 25));
     out.push(field('Reach a command line', `${desktop.can_reach_a_terminal ? 'yes' : 'no'}`, 25));
     out.push(field('Taskbar and start menu', `${desktop.taskbar_and_start_menu ? 'yes' : 'no'}`, 25));
+    out.push(field('Screen layout', LAYOUT_WORDS[recipe.desktop?.layout ?? 'windows'], 25));
     out.push(field('Familiar folder names', `${desktop.familiar_folder_names ? 'yes' : 'no'}`, 25));
     out.push(field('Guided first boot', `${desktop.guided_first_boot ? 'yes' : 'no'}`, 25));
   }

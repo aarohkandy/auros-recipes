@@ -101,6 +101,10 @@ prune:                             # ---- THIS BLOCK IS THE PRODUCT ----
 
 policy: managed                    # open | managed | locked | kiosk. Four words with published
                                    # meanings and no fifth value. See §3.
+desktop:
+  layout: browser-first            # windows | browser-first | simple | mac. Where things are on
+                                   # screen for every new user; leave it out for windows. Refused
+                                   # under kiosk, which has no desktop to lay out.
 
 windows_apps:                      # the honest .exe capability.
   enabled: true                    # installs a Windows-compatibility app from Flathub.
@@ -179,7 +183,7 @@ rules running ahead of the real ones.
 | `prune.also_remove` | with `keep_only:false` | Named groups from a published list. Under `keep_only:true` it is the *record of what was asked for* and removes nothing further — the sweep has already taken every one of those packages, and validation says so on the build report. | Anything outside that list. Accessibility tools are refused **by name, with a sentence**, not quietly ignored. |
 | `prune.must_remove_at_least` | yes | A floor. Fewer removed ⇒ the build fails. | Zero. A recipe that removes nothing is not a recipe we build. |
 | `policy` | yes | `open` / `managed` / `locked` / `kiosk`. | A fifth value. A mode we cannot prove is in force on a booted machine is a mode we cannot sell. |
-| `desktop` | no | The Windows-shaped layer, one readable line per behaviour. All default to the familiar answer. | Being present at all under `kiosk`. A terminal on anything but `open`. Contradicting `locked`. |
+| `desktop` | no | The Windows-shaped layer, one readable line per behaviour. All default to the familiar answer. `desktop.layout` picks where things are on screen for every new user: `windows` (the default, and what leaving it out means), `browser-first`, `simple` or `mac`. A layout other than `windows` becomes one `RUN /usr/libexec/auros/set-desktop-layout <layout>` line in the Containerfile; `windows` emits nothing, because the base with no call already is the Windows layout. | Being present at all under `kiosk` (so a layout on a kiosk is refused, not ignored). A terminal on anything but `open`. Contradicting `locked`. Any layout outside those four words, including a package id or a path. A layout other than `windows` with `taskbar_and_start_menu: false`: every layout has a menu and a task list, so that pair asks for two opposite things. |
 | `kiosk` | with `policy: kiosk` | What the one window shows, where it may go, how long before the session is wiped. | Being present under any other policy. `http://`, `file://`, `data:`, a username in the address, a query string. An empty allow-list — a kiosk that can reach nothing is broken, not secure. |
 | `windows_apps` | no | The honest `.exe` capability. | Being present under `kiosk` (the compatibility layer is a desktop application and there is no desktop). A result of `works` with no note. Any list of tested programs while the layer is off. |
 | `theme` | no | Preset, accent, text size, pointer size. | Capital letters in hex. A stylesheet or theme archive — that is arbitrary content; a preset plus a colour is not. |

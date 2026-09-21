@@ -418,3 +418,16 @@ test('the disclosed notes from validation reach the customer-facing text', () =>
   assert.match(flat, /no row in hardware\/compat\.tsv yet/);
   assert.match(flat, /stamped on the build report and on the pull request as untested hardware/);
 });
+
+test('the order summary names the screen layout, and says windows is the default when none is chosen', () => {
+  const withLayout = (layout?: string): Doc => {
+    const doc = workstation();
+    const desktop = doc['desktop'] as Doc;
+    if (layout === undefined) delete desktop['layout']; else desktop['layout'] = layout;
+    return doc;
+  };
+  const chosen = explained(withLayout('simple'), 'example-workstation').flat;
+  assert.match(chosen, /Screen layout simple -- one tall bar with three big buttons/);
+  const omitted = explained(withLayout(), 'example-workstation').flat;
+  assert.match(omitted, /Screen layout windows -- a taskbar along the bottom with a start menu \(the default\)/);
+});

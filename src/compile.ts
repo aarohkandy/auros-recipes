@@ -435,6 +435,27 @@ export function compile(options: CompileOptions): string {
   out.push(`RUN /usr/libexec/auros/apply-policy ${token('a policy mode', recipe.policy)}`);
   out.push('');
 
+  // ---- desktop layout ----------------------------------------------------------------------------
+  // Emitted only when it is not windows. The base with no call IS the windows layout (D4), so
+  // `layout: windows` and an omitted field are one request and must be one image -- the same answer
+  // the differ test's kiosk.usb_storage exemption gives for a declared default. Every existing fleet
+  // keeps a byte-identical Containerfile and never depends on a base new enough to carry the helper.
+  const layout = recipe.desktop?.layout;
+  if (layout !== undefined && layout !== 'windows') {
+    out.push(RULE);
+    out.push(
+      ...commentBlock(
+        `DESKTOP LAYOUT: ${layout}\n` +
+          '\n' +
+          'Every new user starts with this layout instead of the Windows one. The helper refuses any\n' +
+          'other word and any layout this base does not ship, so a mismatch fails the build here.',
+      ),
+    );
+    out.push(RULE);
+    out.push(`RUN /usr/libexec/auros/set-desktop-layout ${token('a desktop layout', layout)}`);
+    out.push('');
+  }
+
   // ---- the prune -------------------------------------------------------------------------------
   out.push(RULE);
   out.push(

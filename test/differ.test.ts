@@ -303,6 +303,26 @@ for (const [a, b] of PAIRS) {
   });
 }
 
+test('desktop.layout: every change of layout changes the image definition, and windows is the absent default', () => {
+  const images = new Map<string, string>();
+  for (const layout of [undefined, 'windows', 'browser-first', 'simple', 'mac']) {
+    const doc = readFleet('example-workstation');
+    const desktop = (doc['desktop'] ??= {}) as Doc;
+    if (layout === undefined) delete desktop['layout']; else desktop['layout'] = layout;
+    images.set(String(layout), mustBuild(doc, 'example-workstation').text);
+  }
+  // windows is declared "default": "windows", so it is the same request as leaving it out.
+  assert.equal(images.get('windows'), images.get('undefined'));
+  // Every other value is a different machine, and each is different from the other two.
+  const distinct = new Set(['undefined', 'browser-first', 'simple', 'mac'].map((k) => images.get(k)));
+  assert.equal(distinct.size, 4, 'two different layouts compiled to the same image definition');
+  // And under kiosk the field is refused, not ignored.
+  const k = readFleet('example-kiosk');
+  k['desktop'] = { layout: 'mac' };
+  const got = build(k, 'example-kiosk');
+  assert.equal(got.ok, false, 'a kiosk accepted a desktop layout it has no desktop to show');
+});
+
 test('the exemptions are still exemptions, and each one is load-bearing when it is set', () => {
   // kiosk.usb_storage: absent behaves as false (exempt), but false -> true must move the image, or
   // the exemption above is covering a genuinely dead field.

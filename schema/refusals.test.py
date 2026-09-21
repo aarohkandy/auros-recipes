@@ -93,6 +93,9 @@ MUST_REFUSE = [
     # policy modes mean what they say
     ("a terminal on a managed fleet", m(school, lambda d: d.update(desktop={"can_reach_a_terminal": True}))),
     ("a locked fleet that can install apps", m(school, lambda d: (d.update(policy="locked"), d.update(desktop={"can_install_apps": True})))),
+    ("a desktop layout the base does not ship", m(school, lambda d: d.update(desktop={"layout": "chromebook"}))),
+    ("a desktop layout on a kiosk", m(kiosk, lambda d: d.update(desktop={"layout": "simple"}))),
+    ("a non-windows layout with no taskbar", m(school, lambda d: d.update(desktop={"layout": "mac", "taskbar_and_start_menu": False}))),
     ("a kiosk with a desktop block", m(kiosk, lambda d: d.update(desktop={"taskbar_and_start_menu": True}))),
     ("a kiosk running Windows programs", m(kiosk, lambda d: d.update(windows_apps={"enabled": True, "we_promise_nothing_else": True}))),
     ("a kiosk keeping a full desktop", m(kiosk, lambda d: d["prune"].update(keep_only_the_apps_above=False, also_remove=["games"]))),

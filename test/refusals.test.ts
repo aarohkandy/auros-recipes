@@ -325,6 +325,26 @@ const MUST_REFUSE: ReadonlyArray<Case> = [
     says: /locked means locked/i,
   },
   {
+    label: 'a desktop layout the base does not ship',
+    doc: mutate(S, (d) => { d['desktop'] = { layout: 'chromebook' }; }),
+    says: /not one of the published choices[\s\S]*no fifth layout/i,
+  },
+  {
+    label: 'a desktop layout named by its package id',
+    doc: mutate(S, (d) => { d['desktop'] = { layout: 'org.auros.mac.desktop' }; }),
+    says: /not one of the published choices/i,
+  },
+  {
+    label: 'a desktop layout on a kiosk, which has no desktop (D12)',
+    doc: mutate(K, (d) => { d['desktop'] = { layout: 'simple' }; }),
+    says: /kiosk has no desktop/i,
+  },
+  {
+    label: 'a non-windows layout with no taskbar and start menu',
+    doc: mutate(S, (d) => { d['desktop'] = { layout: 'mac', taskbar_and_start_menu: false }; }),
+    says: /taskbar and a start menu of its own shape/i,
+  },
+  {
     label: 'a kiosk with a desktop to shape',
     doc: mutate(K, (d) => { d['desktop'] = { taskbar_and_start_menu: true }; }),
     says: /kiosk has no desktop/i,

@@ -284,6 +284,16 @@
           "description": "Whether a command line is reachable at all. Nothing this product promises ever requires one, so this defaults to false everywhere and may only be true when the policy is open — a machine we hand to a school is a machine where the terminal is not part of the deal.",
           "type": "boolean",
           "default": false
+        },
+        "layout": {
+          "description": "Where things are on screen, for every new user of these machines. windows — a taskbar along the bottom with a start menu; the default, and what an omitted field means. browser-first — the launcher at the left and pinned apps in the middle, the shape pupils know from school laptops. simple — one tall bar with three big buttons, for young children and first-time users. mac — a bar along the top with the menu and the clock, and a dock of apps along the bottom, for people coming from a Mac. Every layout keeps the menu, the Wi-Fi and the clock. None of them is a lockdown; that is what policy is for. There is no fifth layout and no way to name one of your own: these four are the ones the base image ships and tests.",
+          "enum": [
+            "windows",
+            "browser-first",
+            "simple",
+            "mac"
+          ],
+          "default": "windows"
         }
       }
     },
@@ -739,6 +749,42 @@
               },
               "can_reach_a_terminal": {
                 "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Every layout other than windows is a taskbar and a start menu of its own shape",
+      "description": "browser-first, simple and mac each have a menu and a list of open windows; they only put them somewhere else. Choosing one of them while also saying there is no taskbar and start menu asks for two opposite things, so the file is refused rather than one of the two lines quietly winning. Leave taskbar_and_start_menu out, or choose the windows layout.",
+      "if": {
+        "properties": {
+          "desktop": {
+            "properties": {
+              "layout": {
+                "enum": [
+                  "browser-first",
+                  "simple",
+                  "mac"
+                ]
+              }
+            },
+            "required": [
+              "layout"
+            ]
+          }
+        },
+        "required": [
+          "desktop"
+        ]
+      },
+      "then": {
+        "properties": {
+          "desktop": {
+            "properties": {
+              "taskbar_and_start_menu": {
+                "const": true
               }
             }
           }

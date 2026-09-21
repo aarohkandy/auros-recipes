@@ -13,6 +13,9 @@ import { parse as parseYaml, parseDocument, isScalar } from 'yaml';
 
 export type Policy = 'open' | 'managed' | 'locked' | 'kiosk';
 
+/** The four Plasma layouts the base ships; the base's set-desktop-layout accepts exactly these words. */
+export type Layout = 'windows' | 'browser-first' | 'simple' | 'mac';
+
 export interface Recipe {
   schema: 1;
   name: string;
@@ -45,6 +48,7 @@ export interface Recipe {
     guided_first_boot?: boolean;
     can_install_apps?: boolean;
     can_reach_a_terminal?: boolean;
+    layout?: Layout;
   };
   kiosk?: {
     opens: string;

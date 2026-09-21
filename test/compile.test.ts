@@ -435,3 +435,23 @@ test('a kiosk naming NO openable application stops the compiler too', () => {
     /a kiosk needs an application to run|it is a brick/,
   );
 });
+
+// ---- desktop.layout ---------------------------------------------------------------------------
+// One RUN line for a non-default layout, none for windows: the base with no call IS the windows
+// layout (D4), so `layout: windows` and an omitted field are the same request and the same image.
+
+const LAYOUT_RUN = /^RUN \/usr\/libexec\/auros\/set-desktop-layout (\S+)$/gm;
+
+test('desktop.layout: each non-default layout emits exactly one set-desktop-layout line naming it', () => {
+  for (const layout of ['browser-first', 'simple', 'mac']) {
+    const text = build(mutate(workstation(), (d) => { (d['desktop'] as Doc)['layout'] = layout; }), 'example-workstation');
+    assert.deepEqual([...text.matchAll(LAYOUT_RUN)].map((m) => m[1]), [layout], `layout ${layout}`);
+  }
+});
+
+test('desktop.layout: windows and an omitted field compile to the same bytes, with no helper call', () => {
+  const omitted = build(mutate(workstation(), (d) => { delete (d['desktop'] as Doc)['layout']; }), 'example-workstation');
+  const windows = build(mutate(workstation(), (d) => { (d['desktop'] as Doc)['layout'] = 'windows'; }), 'example-workstation');
+  assert.equal(windows, omitted);
+  assert.doesNotMatch(omitted, /set-desktop-layout/);
+});

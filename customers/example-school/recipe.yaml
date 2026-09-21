@@ -28,6 +28,8 @@ prune:
   also_remove: [developer tools, games, remote desktop, sample wallpapers and media, virtualisation]
   must_remove_at_least: 240
 policy: managed
+desktop:
+  layout: browser-first     # pupils already know this shape from school Chromebooks
 windows_apps:
   enabled: true
   we_promise_nothing_else: true
