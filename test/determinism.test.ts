@@ -23,7 +23,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { compile } from '../src/compile.ts';
+import { compile, resolveSourceDateEpoch } from '../src/compile.ts';
 import { loadConfig } from '../src/config.ts';
 import { validateDocument } from '../src/validate.ts';
 import { ROOT, school, kiosk, workstation, toolchain, type Doc } from './helpers.ts';
@@ -262,4 +262,64 @@ test('a recipe with no lists left to shuffle still compiles, so the loop above h
   const b = build(doc, 'example-workstation');
   assert.equal(a, b);
   assert.match(a, /FROM \$\{BASE\}/);
+});
+
+// -------------------------------------------------------------------------------------------------
+// $SOURCE_DATE_EPOCH that is not a number
+// -------------------------------------------------------------------------------------------------
+
+test('a SOURCE_DATE_EPOCH that is not a number is ignored, and the approval date is used instead', () => {
+  /*
+   * The guard is `/^[0-9]+$/.test(declared)`, and the test above only ever set a valid epoch -- so
+   * removing the guard changed nothing any assertion could see. What it produces is Number('today')
+   * = NaN, written into `ARG SOURCE_DATE_EPOCH=NaN` and into the auros.source-date-epoch label: a
+   * build that is not reproducible while carrying a label that says it is pinned. The label is the
+   * thing a person checks, so the failure hides inside its own evidence.
+   *
+   * `resolveSourceDateEpoch` takes the environment as an argument precisely so this can be tested
+   * without touching process.env, which node --test shares across the tests in one file.
+   */
+  const path = join(ROOT, 'customers', 'example-school', 'recipe.yaml');
+  const result = validateDocument(toolchain(), school(), path);
+  assert.ok(result.ok);
+  const recipe = result.recipe!;
+  const approved = Date.parse(`${recipe.approved_by.date}T00:00:00Z`) / 1000;
+  assert.ok(Number.isFinite(approved) && approved > 0, 'the fixture has no usable approval date');
+
+  for (const declared of ['today', '12x3', '', ' 1700000000', '1700000000 ', '1_700_000_000', '-1', '1.5', 'NaN', '0x10']) {
+    const epoch = resolveSourceDateEpoch(recipe, { SOURCE_DATE_EPOCH: declared });
+    assert.ok(Number.isFinite(epoch), `SOURCE_DATE_EPOCH=${JSON.stringify(declared)} produced ${epoch}`);
+    assert.equal(
+      epoch,
+      approved,
+      `SOURCE_DATE_EPOCH=${JSON.stringify(declared)} was read as a number instead of falling back to the approval date`,
+    );
+  }
+
+  // The control: a value that IS a number is honoured, or the guard above could be "ignore it always".
+  assert.equal(resolveSourceDateEpoch(recipe, { SOURCE_DATE_EPOCH: '1700000000' }), 1_700_000_000);
+  assert.equal(resolveSourceDateEpoch(recipe, { SOURCE_DATE_EPOCH: '0' }), 0);
+  assert.equal(resolveSourceDateEpoch(recipe, {}), approved, 'an unset variable did not fall back to the approval date');
+});
+
+test('and no Containerfile this compiler writes can carry a NaN epoch', () => {
+  // The consequence, asserted on output: ARG and LABEL are both derived from the same number, and
+  // 'NaN' is a string that reads as a value rather than as an error anywhere downstream.
+  const path = join(ROOT, 'customers', 'example-school', 'recipe.yaml');
+  const result = validateDocument(toolchain(), school(), path);
+  assert.ok(result.ok);
+  const text = compile({
+    recipe: result.recipe!,
+    recipePath: path,
+    plan: result.plan!,
+    fonts: result.fonts ?? [],
+    config,
+    catalogue: toolchain().catalogue,
+    baseDigest: DIGEST,
+    sourceDateEpoch: resolveSourceDateEpoch(result.recipe!, { SOURCE_DATE_EPOCH: 'today' }),
+    notes: result.notes,
+  });
+  assert.doesNotMatch(text, /NaN/, 'NaN reached the Containerfile');
+  assert.match(text, /^ARG SOURCE_DATE_EPOCH=[0-9]+$/m);
+  assert.match(text, /source-date-epoch="[0-9]+"/);
 });

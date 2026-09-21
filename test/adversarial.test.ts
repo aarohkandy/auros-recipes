@@ -13,7 +13,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { auditScripts } from '../src/scripts.ts';
+import { auditScripts, scriptsUsedIn } from '../src/scripts.ts';
 import { ROOT, check, mutate, said, school, type Doc } from './helpers.ts';
 
 // -------------------------------------------------------------------------------------------------
@@ -101,7 +101,7 @@ test('an unknown other_language is pointed at by its own index, not by indexOf',
 // -------------------------------------------------------------------------------------------------
 
 /** A throwaway git repository holding one fleet and the ratchet script. */
-function ratchetRepo(): { dir: string; git: (...a: string[]) => string; run: () => { status: number | null; out: string } } {
+function ratchetRepo(): { dir: string; git: (...a: string[]) => string; run: (base?: string) => { status: number | null; out: string } } {
   const dir = mkdtempSync(join(tmpdir(), 'auros-ratchet-'));
   mkdirSync(join(dir, 'scripts'));
   cpSync(join(ROOT, 'scripts', 'floor-ratchet.mjs'), join(dir, 'scripts', 'floor-ratchet.mjs'));
@@ -110,8 +110,11 @@ function ratchetRepo(): { dir: string; git: (...a: string[]) => string; run: () 
   const git = (...a: string[]) =>
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' });
   git('init', '-q', '-b', 'main');
-  const run = () => {
-    const r = spawnSync(process.execPath, ['scripts/floor-ratchet.mjs', 'main'], { cwd: dir, encoding: 'utf8' });
+  // The base ref is a parameter, not a literal. It was 'main' in every call, which is the only ref
+  // that resolves -- so the script's "a check that cannot run has not passed" branch had never been
+  // reached by anything.
+  const run = (base = 'main') => {
+    const r = spawnSync(process.execPath, ['scripts/floor-ratchet.mjs', base], { cwd: dir, encoding: 'utf8' });
     return { status: r.status, out: r.stdout + r.stderr };
   };
   return { dir, git, run };
@@ -205,5 +208,218 @@ test('c100 through the CLI: exit 1, and the Python validator agrees', () => {
       assert.notEqual(r.status, 0, `the Python validator accepted schema: 1.0\n${r.stdout}${r.stderr}`);
       assert.match(r.stdout, /written as '1\.0'/);
     }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// -------------------------------------------------------------------------------------------------
+// S01: Latin is a script, and the font-coverage check had never been asked about it
+// -------------------------------------------------------------------------------------------------
+
+/*
+ * The check above is tested for Han, Hangul, Kana, Armenian, Georgian, Khmer, emoji and an unnamed
+ * code point -- and never for the script the tests themselves are written in. isNeutral() calls
+ * U+0020..U+0040 "punctuation every font carries", and widening that range by one nibble to 0x7E
+ * makes every ASCII LETTER neutral too. Every test above still passes, because none of them is in
+ * Latin; scriptsUsedIn('Hello') quietly returns [].
+ *
+ * A Marathi-medium school is the fleet where this matters, and it is the first customer profile in
+ * the spec: Devanagari fonts, no Latin ones, and a welcome sentence somebody typed in English.
+ */
+
+test('Latin is a script like any other, and scriptsUsedIn says so', () => {
+  assert.deepEqual(scriptsUsedIn('Hello'), ['Latin']);
+  assert.deepEqual(scriptsUsedIn('Welcome to the library'), ['Latin']);
+  // The other half of the same line: the characters that really are neutral must stay neutral, or
+  // the fix for this is "call everything a script" and every message is refused.
+  assert.deepEqual(scriptsUsedIn('0123456789 !"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~ — “…”'), []);
+});
+
+test('Latin is a script like any other: an English message on a Devanagari-only fleet is refused', () => {
+  const marathiOnly = mutate(school(), (d) => {
+    d['language'] = 'Marathi';           // catalogue/languages.tsv: scripts = Devanagari, fonts = Noto Devanagari
+    delete d['other_languages'];          // ... so nothing on this fleet brings a Latin font
+    d['first_boot_message'] = 'Welcome to the library';
+  });
+  const r = check(marathiOnly);
+  assert.equal(r.ok, false, 'an English sentence was accepted on a fleet with no Latin fonts');
+  assert.ok(r.refusals.some((x) => x.where === 'first_boot_message'), said(r));
+  assert.match(said(r), /Latin/);
+});
+
+test('the control for that: the same fleet may greet in Marathi, and adding English fonts fixes it', () => {
+  const inMarathi = mutate(school(), (d) => {
+    d['language'] = 'Marathi';
+    delete d['other_languages'];
+    d['first_boot_message'] = 'नमस्कार! काही अडचण असल्यास शिक्षकांना सांगा.';
+  });
+  assert.ok(check(inMarathi).ok, said(check(inMarathi)));
+
+  const andEnglish = mutate(school(), (d) => {
+    d['language'] = 'Marathi';
+    d['other_languages'] = ['English (India)'];
+    d['first_boot_message'] = 'Welcome to the library';
+  });
+  assert.ok(check(andEnglish).ok, said(check(andEnglish)));
+});
+
+test('auditScripts agrees, directly, so the rule is pinned below the validator too', () => {
+  assert.deepEqual(auditScripts('Welcome', new Set(['Devanagari'])), { missing: ['Latin'], unnamed: [] });
+  assert.deepEqual(auditScripts('Welcome', new Set(['Latin'])), { missing: [], unnamed: [] });
+});
+
+// -------------------------------------------------------------------------------------------------
+// The ratchet, in the half that gates merges: the three ways it could be made to pass
+// -------------------------------------------------------------------------------------------------
+
+/*
+ * c091 above proves the ratchet catches the obvious attack. A mutation run on 2026-09-20 found four
+ * changes to scripts/floor-ratchet.mjs that it does not catch, and every one of them turns the gate
+ * green rather than red:
+ *
+ *   F01  `wanted >= atBase.published`    -> `>= atBase.published - 1`   one package per pull request
+ *   F02  `allowLower === null || reason === ''` -> `&&`                 a permission slip with no reason
+ *   F05  the "checked nothing" guard deleted                           a pass having examined zero fleets
+ *   F06  the merge-base catch exits 0 instead of 2                     a shallow clone verifies nothing
+ *
+ * F05 and F06 are the same class as the SELinux kernel-argument check: a check that cannot run, or
+ * that ran over nothing, is indistinguishable from one that passed -- unless something asserts it.
+ */
+
+test('a pull request that lowers the floor by one is refused', () => {
+  const { dir, git, run } = ratchetRepo();
+  try {
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(240));
+    writeFileSync(join(dir, 'customers/lincoln/removal-floor.lock'), 'MUST_REMOVE_AT_LEAST=240\n');
+    git('add', '-A'); git('commit', '-qm', 'base');
+
+    git('checkout', '-qb', 'pr');
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(239));
+    git('add', '-A'); git('commit', '-qm', 'just one, nobody will notice');
+
+    const r = run();
+    assert.equal(r.status, 1, `a one-package lowering passed CI:\n${r.out}`);
+    assert.match(r.out, /lowers the removal floor from 240 to 239/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a merged permission slip with no REASON does not let CI pass', () => {
+  // The base branch carries ALLOW_LOWER_TO and no REASON. The number alone is somebody's typing; the
+  // reason is the half a reviewer reads, and it is what tells an upstream repackaging apart from a
+  // build that quietly stopped removing things.
+  const { dir, git, run } = ratchetRepo();
+  try {
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(240));
+    writeFileSync(join(dir, 'customers/lincoln/removal-floor.lock'), 'MUST_REMOVE_AT_LEAST=240\nALLOW_LOWER_TO=235\n');
+    git('add', '-A'); git('commit', '-qm', 'permission with no reason, merged on its own');
+
+    git('checkout', '-qb', 'pr');
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(235));
+    git('add', '-A'); git('commit', '-qm', 'use it');
+
+    const r = run();
+    assert.equal(r.status, 1, `a permission slip with no reason let the floor fall:\n${r.out}`);
+    assert.match(r.out, /the permission to do so is not on the base branch/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('and the mirror image: a REASON with no number does not let CI pass either', () => {
+  const { dir, git, run } = ratchetRepo();
+  try {
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(240));
+    writeFileSync(join(dir, 'customers/lincoln/removal-floor.lock'), 'MUST_REMOVE_AT_LEAST=240\nREASON=upstream folded two packages into one\n');
+    git('add', '-A'); git('commit', '-qm', 'a reason and no number');
+
+    git('checkout', '-qb', 'pr');
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(235));
+    git('add', '-A'); git('commit', '-qm', 'use it');
+
+    assert.equal(run().status, 1, 'a reason with no number let the floor fall');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('floor-ratchet refuses to report a pass when it checked nothing', () => {
+  /*
+   * The guard whose whole purpose is to prove the check ran. Deleted, the gate prints
+   * "0 fleet(s), the floor only turned one way" and exits 0 -- which is what a green CI run looks
+   * like when customers/ failed to check out, when the recipes moved, or when somebody renamed the
+   * field. D34: a check that cannot fail is not a check, and this one exists to fail.
+   */
+  for (const [label, write] of [
+    ['no recipes at all', () => {}],
+    ['a recipe with no floor in it', (d: string) => writeFileSync(join(d, 'customers/lincoln/recipe.yaml'), 'name: lincoln\nprune:\n  keep_only_the_apps_above: true\n')],
+    ['a floor that is not a number', (d: string) => writeFileSync(join(d, 'customers/lincoln/recipe.yaml'), 'name: lincoln\nprune:\n  must_remove_at_least: "240"\n')],
+  ] as const) {
+    const { dir, git, run } = ratchetRepo();
+    try {
+      write(dir);
+      writeFileSync(join(dir, 'README.md'), 'a repository with nothing to ratchet\n');
+      git('add', '-A'); git('commit', '-qm', 'base');
+      git('checkout', '-qb', 'pr');
+      writeFileSync(join(dir, 'README.md'), 'still nothing\n');
+      git('add', '-A'); git('commit', '-qm', 'pr');
+
+      const r = run();
+      assert.equal(r.status, 2, `${label}: the gate reported a pass having examined zero fleets:\n${r.out}`);
+      assert.match(r.out, /refusing to report a pass/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
+test('the control for that: one fleet with a floor IS examined, and says so', () => {
+  const { dir, git, run } = ratchetRepo();
+  try {
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(240));
+    writeFileSync(join(dir, 'customers/lincoln/removal-floor.lock'), 'MUST_REMOVE_AT_LEAST=240\n');
+    git('add', '-A'); git('commit', '-qm', 'base');
+    git('checkout', '-qb', 'pr');
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(260));
+    git('add', '-A'); git('commit', '-qm', 'raise');
+
+    const r = run();
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /1 fleet\(s\)/, 'the pass did not say how many fleets it looked at');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('an unresolvable base ref is exit 2, not a pass', () => {
+  /*
+   * Fail-open is the worst failure a gate has, because it is silent and it looks like success. A
+   * shallow clone, a fork whose base branch was renamed, or an `actions/checkout` with
+   * fetch-depth: 1 all produce a base ref that shares no history with HEAD -- and the script's own
+   * comment says "a check that cannot run has not passed." Nothing asserted that sentence.
+   */
+  const { dir, git, run } = ratchetRepo();
+  try {
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(240));
+    writeFileSync(join(dir, 'customers/lincoln/removal-floor.lock'), 'MUST_REMOVE_AT_LEAST=240\n');
+    git('add', '-A'); git('commit', '-qm', 'main');
+
+    // A branch that shares no history at all: `git merge-base` has nothing to answer with.
+    git('checkout', '-q', '--orphan', 'unrelated');
+    writeFileSync(join(dir, 'unrelated.txt'), 'a history of its own\n');
+    git('add', '-A'); git('commit', '-qm', 'orphan');
+    git('checkout', '-q', 'main');
+
+    const unrelated = run('unrelated');
+    assert.equal(unrelated.status, 2, `a base ref sharing no history was reported as a pass:\n${unrelated.out}`);
+    assert.match(unrelated.out, /cannot resolve a merge base/);
+    assert.match(unrelated.out, /has not passed/);
+
+    const absent = run('origin/no-such-branch');
+    assert.equal(absent.status, 2, `a base ref that does not exist was reported as a pass:\n${absent.out}`);
+
+    // The control: the ref that does resolve still exits 0, so exit 2 above is about the ref.
+    assert.equal(run('main').status, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('no base ref at all is exit 2, and the message says why', () => {
+  const { dir, git } = ratchetRepo();
+  try {
+    writeFileSync(join(dir, 'customers/lincoln/recipe.yaml'), recipeWithFloor(240));
+    git('add', '-A'); git('commit', '-qm', 'main');
+    const r = spawnSync(process.execPath, ['scripts/floor-ratchet.mjs'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /no base ref given/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

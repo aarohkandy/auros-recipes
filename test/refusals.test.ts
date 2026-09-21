@@ -15,7 +15,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { check, kiosk, mutate, said, school, workstation, type Doc } from './helpers.ts';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadFamilies, loadToolchain, validateDocument, type Toolchain, type ValidationResult } from '../src/validate.ts';
+import { ROOT, check, kiosk, mutate, said, school, toolchain, workstation, type Doc } from './helpers.ts';
 
 interface Case {
   /** What somebody was trying to do. */
@@ -1126,4 +1130,388 @@ test('a refusal never echoes a ten-megabyte value back at whoever is reading the
   const text = said(huge);
   assert.ok(text.length < 4000, `the refusal for a 5 MB value is itself ${text.length} characters long`);
   assert.match(text, /characters\)|more than \d+ characters/, 'the refusal does not say how long the value was');
+});
+
+// -------------------------------------------------------------------------------------------------
+// The refusals that had no test at all, because the file they read is empty in every run
+// -------------------------------------------------------------------------------------------------
+
+/*
+ * Everything above validates against the REAL schema and the REAL catalogue, and that is right --
+ * it is the configuration a customer's recipe is judged by. It also means three whole rules have
+ * never been exercised, because the data that would trigger them does not exist yet:
+ *
+ *   - hardware/compat.tsv is header-only today, so the `verdict = unsupported` refusal is a dead
+ *     branch in every run. The single decision spec section 9 reserves to a human about hardware --
+ *     "whether a hardware model is declared unsupported" -- is enforced by code nothing tests.
+ *   - every language in catalogue/languages.tsv has fonts, so "known language, no font package" is
+ *     unreachable.
+ *   - recipe.schema.json's keyboard enum and catalogue/keyboards.tsv agree, so the DRIFT check
+ *     between them is unreachable. Its entire purpose is the day they stop agreeing.
+ *
+ * A branch that cannot be reached is a branch nothing is holding in place. Each test below builds a
+ * fixture repository root -- the real schema, a copy of the catalogue with one row changed, and a
+ * compat.tsv of its own -- so the rule is judged on data that triggers it. scripts/prove-red.mjs
+ * rows V13, V16, V17, V24, V27 and V28 reintroduce each bug and require these tests to go red.
+ */
+
+/**
+ * A repository root that is the real one with one file edited.
+ *
+ * A COPY of the real schema and catalogue, not a miniature, for the same reason catalogue.test.ts
+ * copies rather than invents: the fault under test should be the only difference between this
+ * configuration and the one that works.
+ */
+function withFixtureRoot<T>(
+  edit: (root: string) => void,
+  body: (ctx: { root: string; tool: Toolchain; judge: (doc: Doc, fleet?: string) => ValidationResult }) => T,
+): T {
+  const root = mkdtempSync(join(tmpdir(), 'auros-fixture-root-'));
+  try {
+    cpSync(join(ROOT, 'schema'), join(root, 'schema'), { recursive: true });
+    cpSync(join(ROOT, 'catalogue'), join(root, 'catalogue'), { recursive: true });
+    mkdirSync(join(root, 'customers'), { recursive: true });
+    edit(root);
+    const tool = loadToolchain(root);
+    const judge = (doc: Doc, fleet = 'fixture-fleet'): ValidationResult => {
+      const dir = join(root, 'customers', fleet);
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, 'recipe.yaml');
+      writeFileSync(path, JSON.stringify(doc));
+      return validateDocument(tool, doc, path);
+    };
+    return body({ root, tool, judge });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/** The school recipe, renamed so it matches the fixture folder it will be judged in. */
+function fixtureFleet(fn: (d: Doc) => void = () => {}): Doc {
+  return mutate(S, (d) => { d['name'] = 'fixture-fleet'; fn(d); });
+}
+
+test('the control: the school recipe is accepted against a fixture root that changed nothing', () => {
+  // Without this, every refusal below could be the fixture root being broken rather than the rule
+  // firing. This is the same reasoning as the direction audit in DECISIONS.md D34.
+  withFixtureRoot(() => {}, ({ judge }) => {
+    const r = judge(fixtureFleet());
+    assert.ok(r.ok, said(r));
+  });
+});
+
+// ---- hardware/compat.tsv -------------------------------------------------------------------------
+
+/** One row of compat.tsv, built by column index so the test cannot miscount the way the reader did. */
+function compatRow(model: string, columns: Partial<Record<'webcam' | 'verdict', string>>): string {
+  const cells = new Array<string>(17).fill('');
+  cells[0] = model;
+  cells[1] = '2014';
+  cells[2] = 'vm';
+  cells[12] = columns.webcam ?? 'good';
+  cells[13] = columns.verdict ?? 'good';
+  cells[14] = 'written by test/refusals.test.ts';
+  return cells.join('\t');
+}
+
+const COMPAT_HEADER =
+  'model\tyear\tsource\tcpu\tram_gb\tfirmware\twifi\ttrackpad\tsuspend\tbrightness\tgpu\taudio\twebcam\tverdict\tnotes\ttested_on\ttester';
+
+function withCompat<T>(rows: string[], body: Parameters<typeof withFixtureRoot>[1]): T {
+  return withFixtureRoot((root) => {
+    mkdirSync(join(root, '.auros-meta', 'hardware'), { recursive: true });
+    writeFileSync(join(root, '.auros-meta', 'hardware', 'compat.tsv'), `${COMPAT_HEADER}\n${rows.join('\n')}\n`);
+  }, body) as T;
+}
+
+test('a model recorded as unsupported is refused, and the pointer names the model', () => {
+  /*
+   * Spec section 9 reserves exactly one hardware decision to a human: whether a model is declared
+   * unsupported. The recipe side of that decision is this refusal, and it is what stops a fleet
+   * ordering three hundred machines of a model somebody already established does not work. Today
+   * compat.tsv is header-only, so the branch never runs and nothing would notice it being deleted --
+   * until the first row lands, which is the moment it stops being hypothetical.
+   */
+  withCompat(
+    [
+      compatRow('dell-latitude-e6440', { verdict: 'good' }),
+      compatRow('hp-probook-650-g1', { verdict: 'unsupported' }),
+      compatRow('lenovo-thinkpad-t440', { verdict: 'good' }),
+    ],
+    ({ judge }) => {
+      const r = judge(fixtureFleet());
+      assert.equal(r.ok, false, 'a model a human deliberately marked unsupported was accepted');
+      assert.match(said(r), /'hp-probook-650-g1' is recorded in hardware\/compat\.tsv as unsupported/);
+      assert.match(said(r), /a decision a human made deliberately/);
+      // The pointer is INDEXED here, unlike the unknown-model note, because a reader needs to know
+      // which entry of their own list to take out. models: [dell..., hp..., lenovo...] -> index 1.
+      assert.ok(
+        r.refusals.some((x) => x.where === 'hardware.models[1]'),
+        `the refusal did not point at the model that is unsupported:\n${said(r)}`,
+      );
+    },
+  );
+});
+
+test('the control: the same three models with a good verdict are accepted, and produce no note', () => {
+  withCompat(
+    ['dell-latitude-e6440', 'hp-probook-650-g1', 'lenovo-thinkpad-t440'].map((m) => compatRow(m, {})),
+    ({ judge }) => {
+      const r = judge(fixtureFleet());
+      assert.ok(r.ok, said(r));
+      assert.deepEqual(
+        r.notes.filter((n) => n.includes('has no row in hardware/compat.tsv')),
+        [],
+        'a model that HAS a row was still reported as untested hardware',
+      );
+    },
+  );
+});
+
+test('the verdict column is column 13, not the webcam column beside it', () => {
+  /*
+   * This is the test that pins the index, and it is the one the SELinux bug teaches you to write.
+   * Reading cells[12] instead of cells[13] does not throw, does not log and does not fail anything:
+   * every model simply reads as a webcam note, the unsupported gate stops working, and the only
+   * symptom is a fleet that gets accepted. The assertion below is that a row whose WEBCAM says
+   * 'unsupported' and whose VERDICT says 'good' is ACCEPTED -- which is false for every off-by-one
+   * on either side.
+   */
+  withCompat(
+    [
+      compatRow('dell-latitude-e6440', { webcam: 'unsupported', verdict: 'good' }),
+      compatRow('hp-probook-650-g1', { webcam: 'unsupported', verdict: 'good' }),
+      compatRow('lenovo-thinkpad-t440', { webcam: 'unsupported', verdict: 'good' }),
+    ],
+    ({ judge }) => {
+      const r = judge(fixtureFleet());
+      assert.ok(r.ok, `a broken webcam was read as a verdict of unsupported:\n${said(r)}`);
+    },
+  );
+
+  // And the other side of the same off-by-one: the column AFTER the verdict is notes, so a note
+  // saying the word must not be read as a verdict either.
+  withCompat(
+    [compatRow('dell-latitude-e6440', { verdict: 'good' }).replace(/written by [^\t]*/, 'unsupported')],
+    ({ judge }) => {
+      const r = judge(fixtureFleet());
+      assert.ok(r.ok, `the notes column was read as the verdict:\n${said(r)}`);
+    },
+  );
+});
+
+test('a model with no row at all is disclosed as a note, never silently skipped and never refused', () => {
+  // The third state, asserted so that "refuse unsupported" cannot be satisfied by refusing unknowns
+  // and "allow unknown" cannot be satisfied by ignoring the file.
+  withCompat([compatRow('some-other-machine', {})], ({ judge }) => {
+    const r = judge(fixtureFleet());
+    assert.ok(r.ok, said(r));
+    assert.equal(
+      r.notes.filter((n) => n.includes('has no row in hardware/compat.tsv')).length,
+      3,
+      'the three unknown models were not all disclosed',
+    );
+  });
+});
+
+// ---- catalogue/languages.tsv: known language, no font package --------------------------------------
+
+test('a catalogue language with no font package is refused as a gap to fill', () => {
+  /*
+   * The language is KNOWN and the fonts are MISSING. That is a different situation from a typo, and
+   * the refusal says so: adding the fonts is an edit to catalogue/languages.tsv that a person
+   * reviews. Accepting it produces the screen of empty boxes -- a perfectly valid file, an invisible
+   * failure in review, and the worst possible first impression for somebody meeting this machine.
+   *
+   * Unreachable against the committed catalogue, where every language has fonts. So the fixture
+   * blanks the font column of a language the school actually uses.
+   */
+  withFixtureRoot(
+    (root) => {
+      const path = join(root, 'catalogue', 'languages.tsv');
+      const text = readFileSync(path, 'utf8')
+        .split('\n')
+        .map((line) => (line.startsWith('Marathi\t') ? line.split('\t').map((c, i) => (i === 3 ? '-' : c)).join('\t') : line))
+        .join('\n');
+      assert.match(text, /^Marathi\t[^\t]*\t[^\t]*\t-$/m, 'the fixture did not actually blank the font column');
+      writeFileSync(path, text);
+    },
+    ({ judge }) => {
+      const r = judge(fixtureFleet((d) => { delete d['first_boot_message']; }));
+      assert.equal(r.ok, false, 'a language with no font package was accepted');
+      assert.ok(r.refusals.some((x) => x.where === 'language'), said(r));
+      assert.match(said(r), /is in the catalogue but has no font package/);
+      assert.match(said(r), /a gap to fill rather than a typo to correct/);
+    },
+  );
+});
+
+test('and the same rule points at other_languages by index when the gap is there', () => {
+  withFixtureRoot(
+    (root) => {
+      const path = join(root, 'catalogue', 'languages.tsv');
+      writeFileSync(
+        path,
+        readFileSync(path, 'utf8')
+          .split('\n')
+          .map((line) => (line.startsWith('Hindi\t') ? line.split('\t').map((c, i) => (i === 3 ? '-' : c)).join('\t') : line))
+          .join('\n'),
+      );
+    },
+    ({ judge }) => {
+      // school: other_languages: [English (India), Hindi] -> the gap is at index 1.
+      const r = judge(fixtureFleet());
+      assert.equal(r.ok, false);
+      assert.ok(r.refusals.some((x) => x.where === 'other_languages[1]'), said(r));
+    },
+  );
+});
+
+// ---- the schema and the catalogue drifting apart ---------------------------------------------------
+
+/** The catalogue with one keyboards.tsv row deleted. */
+function withoutKeyboardRow(prefix: string): (root: string) => void {
+  return (root) => {
+    const path = join(root, 'catalogue', 'keyboards.tsv');
+    const before = readFileSync(path, 'utf8');
+    const after = before.split('\n').filter((line) => !line.startsWith(prefix)).join('\n');
+    assert.notEqual(after, before, `the fixture removed nothing: no row in keyboards.tsv starts with ${prefix}`);
+    writeFileSync(path, after);
+  };
+}
+
+test('a keyboard the schema allows but the catalogue does not carry is refused by name', () => {
+  /*
+   * THE DRIFT CHECK. recipe.schema.json's latinKeyboard enum and catalogue/keyboards.tsv are two
+   * lists of the same thing, maintained by hand, in different files. This rule exists for the day
+   * they disagree -- and because they agree today, deleting it changes nothing that any test can
+   * see. What it is holding back is not a bad recipe: it is a recipe the schema accepts, which then
+   * reaches compile(), where catalogue.layouts.get() returns undefined and the compiler throws
+   * "validation should have refused" at a person who did nothing wrong.
+   */
+  withFixtureRoot(withoutKeyboardRow('layout\tEnglish (US)\t'), ({ judge }) => {
+    const r = judge(fixtureFleet());
+    assert.equal(r.ok, false, 'a layout the catalogue no longer carries was accepted');
+    assert.ok(r.refusals.some((x) => x.where === 'keyboard'), said(r));
+    assert.match(said(r), /'English \(US\)' has no keyboard layout in the catalogue/);
+    assert.match(said(r), /the two have drifted/);
+    assert.match(said(r), /a fault in catalogue\/keyboards\.tsv rather than in your recipe/);
+  });
+});
+
+test('the same drift in second_script is pointed at second_script, not at keyboard', () => {
+  withFixtureRoot(withoutKeyboardRow('layout\tMarathi (InScript)\t'), ({ judge }) => {
+    const r = judge(fixtureFleet());
+    assert.equal(r.ok, false);
+    assert.ok(r.refusals.some((x) => x.where === 'second_script'), said(r));
+    assert.ok(!r.refusals.some((x) => x.where === 'keyboard'), `the primary layout was blamed for the second one:\n${said(r)}`);
+  });
+});
+
+test('a switch_scripts_with with no xkb option in the catalogue is refused', () => {
+  /*
+   * The same drift, one field over, and the consequence is quieter. compile() reads the toggle with
+   * catalogue.toggles.get(); undefined does not throw there, it just omits the XkbOptions line from
+   * the generated X configuration. The image builds, boots, looks right, and the second layout
+   * cannot be reached -- on a Marathi fleet, that is the script the pupils type in.
+   */
+  withFixtureRoot(withoutKeyboardRow('toggle\tWindows key + Spacebar\t'), ({ judge }) => {
+    const r = judge(fixtureFleet());
+    assert.equal(r.ok, false, 'a toggle the catalogue does not carry was accepted');
+    assert.ok(r.refusals.some((x) => x.where === 'switch_scripts_with'), said(r));
+    assert.match(said(r), /'Windows key \+ Spacebar' has no xkb option in the catalogue/);
+  });
+});
+
+test('the control for all three: removing an unrelated row changes nothing', () => {
+  withFixtureRoot(withoutKeyboardRow('layout\tPolish\t'), ({ judge }) => {
+    const r = judge(fixtureFleet());
+    assert.ok(r.ok, `removing a row this recipe does not use refused it anyway:\n${said(r)}`);
+  });
+});
+
+test('every name the schema offers for these three fields IS in the catalogue today', () => {
+  /*
+   * The drift check above proves the validator would notice. This proves there is nothing to notice
+   * right now -- which is the claim the three tests above cannot make, because each of them breaks
+   * the catalogue on purpose. Together they are the two halves: the rule fires when the lists
+   * disagree, and the lists do not currently disagree.
+   */
+  const schema = JSON.parse(readFileSync(join(ROOT, 'schema', 'recipe.schema.json'), 'utf8')) as Record<string, unknown>;
+  const defs = (schema['$defs'] ?? {}) as Record<string, { enum?: string[] }>;
+  const catalogue = toolchain().catalogue;
+  const missing: string[] = [];
+  for (const name of defs['latinKeyboard']?.enum ?? []) if (!catalogue.layouts.has(name)) missing.push(`latinKeyboard: ${name}`);
+  for (const name of defs['otherScriptKeyboard']?.enum ?? []) if (!catalogue.layouts.has(name)) missing.push(`otherScriptKeyboard: ${name}`);
+  const toggles = ((schema['properties'] as Record<string, { enum?: string[] }>)['switch_scripts_with']?.enum) ?? [];
+  for (const name of toggles) if (!catalogue.toggles.has(name)) missing.push(`switch_scripts_with: ${name}`);
+  assert.deepEqual(missing, [], `the schema offers names catalogue/keyboards.tsv does not carry:\n${missing.join('\n')}`);
+  assert.ok(toggles.length > 0 && (defs['latinKeyboard']?.enum?.length ?? 0) > 0, 'this test read no names at all, so it checked nothing');
+});
+
+// ---- the validator's own refusals --------------------------------------------------------------
+
+test('a reserved-families file with an empty list is refused at load', () => {
+  /*
+   * FAIL-CLOSED, ASSERTED. The families are data now, in schema/reserved-families.json, so that the
+   * Worker behind the website vendors one more FILE rather than reimplementing one more RULE. The
+   * cost of that is a validator whose refusals can be emptied by editing a JSON file -- and an empty
+   * list does not fail loudly, it produces a validator that accepts `kernelArgs`, `baseImage` and
+   * `postInstall` as merely unknown keys. The throw is the only thing standing there, and its own
+   * message says so: "a validator that has forgotten its refusals is a validator that accepts a
+   * kernel pin."
+   */
+  for (const [label, body] of [
+    ['an empty list', '{"families": []}'],
+    ['families that is not a list', '{"families": {}}'],
+    ['no families key at all', '{}'],
+  ] as const) {
+    const dir = mkdtempSync(join(tmpdir(), 'auros-families-'));
+    try {
+      mkdirSync(join(dir, 'schema'), { recursive: true });
+      writeFileSync(join(dir, 'schema', 'reserved-families.json'), body);
+      assert.throws(
+        () => loadFamilies(dir),
+        /no reserved key families|forgotten its refusals/,
+        `${label} produced a validator with no family refusals instead of an error`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('the control: the committed families file loads, and carries the families the refusals rely on', () => {
+  const families = loadFamilies(ROOT);
+  assert.ok(families.length >= 8, `only ${families.length} families loaded`);
+  for (const id of ['base', 'kernel', 'pins', 'scripts', 'gates', 'secrets']) {
+    assert.ok(families.some((f) => f.id === id), `the '${id}' family is gone, and the refusals above name it`);
+  }
+});
+
+test('a reserved key nested under an unknown block is still named by its family', () => {
+  /*
+   * The walk recurses, and the recursion is what makes the family detector work at any depth. Take
+   * it out and the document is STILL refused -- the schema calls `extras` an unknown key -- so every
+   * existing test stays green. What changes is the sentence: the reader is told "not a field this
+   * file has" about `extras`, instead of being told that there is no kernelArgs field and that is
+   * the point. This module's header says that distinction is the entire reason it exists, and
+   * somebody who is told only "unexpected property" tries the next spelling.
+   */
+  const nested = check(mutate(S, (d) => { d['extras'] = { kernelArgs: ['mitigations=off'] }; }));
+  assert.equal(nested.ok, false);
+  assert.match(said(nested), /cannot choose a kernel, a driver or a boot argument/, 'the kernel family was not named');
+  assert.ok(
+    nested.refusals.some((x) => x.where === 'extras.kernelArgs'),
+    `the refusal did not point at the nested key:\n${said(nested)}`,
+  );
+
+  // Two levels down, and inside an array, because one level could be a special case.
+  const deeper = check(mutate(S, (d) => { d['extras'] = { advanced: [{ postInstall: 'curl | sh' }] }; }));
+  assert.equal(deeper.ok, false);
+  assert.match(said(deeper), /A recipe cannot run code/, 'the scripts family was not named two levels down');
+  assert.ok(
+    deeper.refusals.some((x) => x.where === 'extras.advanced[0].postInstall'),
+    `the pointer did not survive an array:\n${said(deeper)}`,
+  );
 });

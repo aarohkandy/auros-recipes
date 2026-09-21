@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { baseReference, imageNameFor, loadConfig, findConfigPath, ConfigNotFound } from '../src/config.ts';
@@ -214,4 +214,190 @@ test('lowering it with a stated reason and an explicit allowance is accepted', (
   } finally {
     fixture.cleanup();
   }
+});
+
+/*
+ * The three tests above are the ones somebody wrote while looking at the happy path. A mutation run
+ * on 2026-09-20 showed what they leave open: each of the following changes to src/validate.ts could
+ * be made with all 433 tests still green.
+ *
+ *   V30  `< published`                        -> `< published - 1`
+ *   V31  `&& reason !== ''` deleted
+ *   V32  `allowLower === wanted`              -> `allowLower <= wanted`
+ *
+ * All three are the same shape -- the rule is tested in the direction it is usually used, and not in
+ * the direction somebody would push it. The refusal text in validate.ts says an alarm you can turn
+ * down one point at a time is not an alarm; V30 is that sentence, unopposed. See
+ * scripts/prove-red.mjs, which reintroduces each one and requires the test below it to go red.
+ */
+
+test('lowering the floor by ONE is still lowering it', () => {
+  // The classic: no single pull request looks wrong, and after forty of them the floor is zero.
+  const fixture = fleetWithLock('MUST_REMOVE_AT_LEAST=240\n', 239);
+  try {
+    const result = validateDocument(toolchain(), fixture.doc, fixture.path);
+    assert.equal(result.ok, false, 'the floor was lowered from 240 to 239 with no permission at all');
+    assert.match(said(result), /lowers the removal floor from 240 to 239/);
+    assert.ok(
+      result.refusals.some((r) => r.where === 'prune.must_remove_at_least'),
+      `the refusal did not point at the field that moved:\n${said(result)}`,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('the control for that: holding at 240 and rising to 241 are both fine', () => {
+  // Without this, "lowering by one is refused" could be passing because the floor rule refuses
+  // everything, which is a different bug wearing the same green tick.
+  for (const floor of [240, 241]) {
+    const fixture = fleetWithLock('MUST_REMOVE_AT_LEAST=240\n', floor);
+    try {
+      const result = validateDocument(toolchain(), fixture.doc, fixture.path);
+      assert.ok(!said(result).includes('lowers the removal floor'), `a floor of ${floor} was treated as a lowering:\n${said(result)}`);
+    } finally {
+      fixture.cleanup();
+    }
+  }
+});
+
+test('a lock that grants permission but states no reason does not grant permission', () => {
+  /*
+   * ALLOW_LOWER_TO on its own is a number somebody typed. The REASON is the half a reviewer reads,
+   * and it is the half that makes the next person able to tell an upstream repackaging (a real
+   * reason for the floor to fall) from a build that quietly stopped removing things (the event this
+   * alarm exists for). A permission slip with no reason on it is not a permission slip.
+   */
+  for (const [label, lock] of [
+    ['no REASON line at all', 'MUST_REMOVE_AT_LEAST=240\nALLOW_LOWER_TO=235\n'],
+    ['a REASON line that is only whitespace', 'MUST_REMOVE_AT_LEAST=240\nALLOW_LOWER_TO=235\nREASON=    \n'],
+  ] as const) {
+    const fixture = fleetWithLock(lock, 235);
+    try {
+      const result = validateDocument(toolchain(), fixture.doc, fixture.path);
+      assert.equal(result.ok, false, `${label}: the floor fell from 240 to 235 with no stated reason`);
+      assert.match(said(result), /lowers the removal floor from 240 to 235/);
+      assert.ok(
+        result.refusals.some((r) => r.where === 'prune.must_remove_at_least'),
+        `${label}: the refusal did not point at prune.must_remove_at_least:\n${said(result)}`,
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  }
+});
+
+test('a lock permitting 235 does not permit 238', () => {
+  // A permission slip is for one number, not for a direction. scripts/floor-ratchet.mjs says exactly
+  // that and has a test for it; this is the same rule in the half that runs in a working tree, and
+  // until now only the half that runs in CI was held to it.
+  const lock = 'MUST_REMOVE_AT_LEAST=240\nALLOW_LOWER_TO=235\nREASON=upstream merged two font packages\n';
+  for (const floor of [236, 238, 239]) {
+    const fixture = fleetWithLock(lock, floor);
+    try {
+      const result = validateDocument(toolchain(), fixture.doc, fixture.path);
+      assert.equal(result.ok, false, `a permission slip for 235 was used to lower the floor to ${floor}`);
+      assert.match(said(result), new RegExp(`lowers the removal floor from 240 to ${floor}`));
+    } finally {
+      fixture.cleanup();
+    }
+  }
+
+  // And the control: the number it actually names still works.
+  const exact = fleetWithLock(lock, 235);
+  try {
+    const result = validateDocument(toolchain(), exact.doc, exact.path);
+    assert.ok(!said(result).includes('lowers the removal floor'), said(result));
+  } finally {
+    exact.cleanup();
+  }
+});
+
+// -------------------------------------------------------------------------------------------------
+// auros.config.json: a broken namespace file, and a $AUROS_CONFIG that points at nothing
+// -------------------------------------------------------------------------------------------------
+
+/** A config file with one key replaced, written somewhere $AUROS_CONFIG can point at. */
+function configFixture(edit: (raw: Record<string, unknown>) => void): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'auros-config-'));
+  const raw = JSON.parse(readFileSync(loadConfig(ROOT).configPath, 'utf8')) as Record<string, unknown>;
+  edit(raw);
+  const path = join(dir, 'auros.config.json');
+  writeFileSync(path, JSON.stringify(raw, null, 2));
+  return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('a config with an empty org is refused, not silently used', () => {
+  /*
+   * requireString checks BOTH that the value is a string and that it is not empty, and only the
+   * first half was tested. An empty org produces an image name like `ghcr.io//auros-example-school`
+   * and a FROM line with an empty component -- a name that looks almost right in a log, resolves
+   * nowhere, and is derived rather than written down, so there is no literal for anybody to grep.
+   */
+  for (const key of ['org', 'product', 'registry', 'baseImage', 'baseTag', 'arch']) {
+    const fixture = configFixture((raw) => { raw[key] = ''; });
+    try {
+      assert.throws(
+        () => loadConfig(join(fixture.path, '..')),
+        (err: unknown) => {
+          assert.match((err as Error).message, new RegExp(`'${key}' is missing or is not a string`), `an empty ${key} was accepted`);
+          return true;
+        },
+        `an empty ${key} was accepted`,
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  }
+});
+
+test('the control: the same fixture with every key present loads', () => {
+  const fixture = configFixture(() => {});
+  try {
+    const config = loadConfig(join(fixture.path, '..'));
+    assert.ok(config.org.length > 0);
+    assert.equal(config.configPath, fixture.path);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('$AUROS_CONFIG pointing at a file that does not exist is an error, never a fallback', () => {
+  /*
+   * The refusal text promises this in words: "Looked for it in $AUROS_CONFIG, in .auros-meta/, and
+   * in every directory above ...". A typo in that variable must not silently resolve to some OTHER
+   * auros.config.json found by walking upwards -- the build would then be namespaced from a file
+   * the operator did not name, and everything downstream would look normal.
+   *
+   * Run from inside this repository ON PURPOSE, because a discoverable config DOES exist above it.
+   * That is the whole point: the fallback is available, and must not be taken.
+   */
+  // `compile`, not `validate`: validate never reads the namespace file, so pointing the variable at
+  // nothing would exit 0 there for a reason that has nothing to do with this rule. The verb under
+  // test has to be one that actually loads the config, or the test is green for free.
+  const discoverable = loadConfig(ROOT).configPath;
+  assert.ok(existsSync(discoverable), 'this test needs a config that a directory search WOULD find');
+
+  const missing = join(tmpdir(), 'auros-no-such-config', 'auros.config.json');
+  const r = spawnSync(process.execPath, [CLI, 'compile', SCHOOL_PATH], {
+    encoding: 'utf8',
+    cwd: ROOT,
+    env: { ...process.env, AUROS_CONFIG: missing },
+  });
+  const out = r.stdout + r.stderr;
+  assert.equal(r.status, 2, `a $AUROS_CONFIG that points at nothing did not stop the tool:\n${out}`);
+  assert.match(out, /AUROS_CONFIG/, 'the message did not name the variable that was wrong');
+  assert.match(out, /which does not exist/);
+  assert.doesNotMatch(r.stdout, /^FROM /m, 'it fell back to another config and compiled a Containerfile anyway');
+
+  // Two controls, because exit 2 on its own could mean compile is broken for everybody.
+  const withVar = spawnSync(process.execPath, [CLI, 'compile', SCHOOL_PATH], {
+    encoding: 'utf8', cwd: ROOT, env: { ...process.env, AUROS_CONFIG: discoverable },
+  });
+  assert.equal(withVar.status, 0, `the variable pointing at a real file failed:\n${withVar.stderr}`);
+
+  const withoutVar = { ...process.env };
+  delete withoutVar['AUROS_CONFIG'];
+  const found = spawnSync(process.execPath, [CLI, 'compile', SCHOOL_PATH], { encoding: 'utf8', cwd: ROOT, env: withoutVar });
+  assert.equal(found.status, 0, `the directory search failed, so the fallback under test does not exist:\n${found.stderr}`);
 });

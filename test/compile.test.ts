@@ -9,12 +9,14 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compile, canonicalJson, resolveSourceDateEpoch, token, UnsafeToken } from '../src/compile.ts';
 import { loadConfig } from '../src/config.ts';
 import type { Recipe } from '../src/recipe.ts';
 import { validateDocument } from '../src/validate.ts';
-import { ROOT, school, kiosk, workstation, mutate, toolchain, type Doc } from './helpers.ts';
+import { ROOT, school, kiosk, said, workstation, mutate, toolchain, type Doc } from './helpers.ts';
 
 const config = loadConfig(ROOT);
 
@@ -234,4 +236,202 @@ test('the disclosed unknowns from validation are stamped into the generated file
   assert.match(text, /DISCLOSED AT VALIDATION TIME/);
   assert.match(text, /no row in hardware\/compat\.tsv yet/);
   assert.match(text, /theme: recorded in the image as data/);
+});
+
+// -------------------------------------------------------------------------------------------------
+// The compiler's own refusals, called DIRECTLY — the layer that exists for a caller who skipped
+// validation, and which was therefore never exercised by anything that goes through validation
+// -------------------------------------------------------------------------------------------------
+
+/*
+ * token() has a test. quotedValue(), the 512 KB logo limit and the ambiguous-kiosk abort did not,
+ * and a mutation run on 2026-09-20 removed all three with the suite still green -- because every
+ * existing caller of compile() reaches it through validateDocument, which refuses these inputs
+ * first. That is the whole point of defence in depth and it is also why it goes untested: the
+ * second layer is unreachable through the front door, so it has to be called at the back.
+ *
+ * scripts/prove-red.mjs rows C02, C03 and C05.
+ */
+
+/** compile(), handed a recipe nobody validated. This is the back door, on purpose. */
+function compileRaw(
+  overrides: { recipe?: Partial<Recipe>; config?: Partial<typeof config>; recipePath?: string } = {},
+  fixture: Doc = school(),
+  dir = 'example-school',
+): string {
+  const path = join(ROOT, 'customers', dir, 'recipe.yaml');
+  const result = validateDocument(toolchain(), fixture, path);
+  assert.ok(result.ok, `the fixture must be valid BEFORE it is corrupted: ${result.refusals.map((r) => r.what).join('; ')}`);
+  return compile({
+    recipe: { ...result.recipe!, ...overrides.recipe },
+    recipePath: overrides.recipePath ?? path,
+    plan: result.plan!,
+    fonts: result.fonts ?? [],
+    config: { ...config, ...overrides.config },
+    catalogue: toolchain().catalogue,
+    baseDigest: DIGEST,
+    notes: result.notes,
+  });
+}
+
+test('the control: the back door produces the same Containerfile as the front door', () => {
+  // Otherwise every assertion below could be about compileRaw being broken.
+  assert.equal(compileRaw(), build(school(), 'example-school', { baseDigest: DIGEST }));
+});
+
+test('a label value containing a quote or a $ stops the compiler', () => {
+  /*
+   * LABEL values are emitted inside double quotes, and quotedValue() is the only thing between a
+   * value and the end of that quoting. A recipe name of `a" LABEL evil="yes` closes the string and
+   * starts writing build instructions; `$(id)` is read by the shell that runs the RUN steps. The
+   * schema's pattern refuses both today -- and the compiler's job is to stop even when the schema
+   * does not, because the schema and the compiler drifting apart is the event this guard is for.
+   */
+  for (const name of ['a" LABEL evil="yes', 'school$(id)', 'school`id`', 'back\\slash', 'a"b']) {
+    assert.throws(
+      () => compileRaw({ recipe: { name } }),
+      (err: unknown) => {
+        assert.ok(err instanceof UnsafeToken, `a recipe name of ${JSON.stringify(name)} produced a Containerfile`);
+        assert.match((err as Error).message, /a label value/);
+        assert.match((err as Error).message, /the schema and\s+the compiler have drifted apart/);
+        return true;
+      },
+      `a recipe name of ${JSON.stringify(name)} produced a Containerfile`,
+    );
+  }
+});
+
+test('and the same for a value that comes from auros.config.json rather than from the recipe', () => {
+  // org reaches two labels: the vendor, and the image title it is a component of. A namespace file
+  // is ours rather than a stranger's, which makes it likelier to be edited by hand and no safer.
+  assert.throws(() => compileRaw({ config: { org: 'acme$(id)' } }), UnsafeToken);
+  assert.throws(() => compileRaw({ config: { product: 'auros"' } }), UnsafeToken);
+});
+
+test('the control for that: an ordinary value with punctuation in it still compiles', () => {
+  // quotedValue refuses four characters, not "anything unusual". Widening it until nothing passes
+  // would satisfy the test above and break every hyphenated name.
+  const text = compileRaw({ recipe: { name: 'st-marys-school' } });
+  assert.match(text, /st-marys-school/);
+});
+
+test('every LABEL line the compiler emits is balanced, so nothing escaped its quotes', () => {
+  // The property the refusal above protects, asserted on real output rather than inferred.
+  for (const [doc, dir] of [[school(), 'example-school'], [kiosk(), 'example-kiosk'], [workstation(), 'example-workstation']] as const) {
+    const text = build(doc, dir, { baseDigest: DIGEST });
+    const labels = text.split('\n').filter((l) => /^ {4}\S+="/.test(l));
+    assert.ok(labels.length > 5, `${dir}: found ${labels.length} label lines, so this test read nothing`);
+    for (const line of labels) {
+      assert.match(line, /^ {4}[A-Za-z0-9._-]+="[^"\\$`]*"( \\)?$/, `${dir}: a label line is not a balanced quoted value:\n${line}`);
+    }
+  }
+});
+
+test('a logo over 512 KB stops the compiler, and one just under it does not', () => {
+  /*
+   * The logo is carried INLINE, base64-encoded, in every Containerfile and therefore in every
+   * rebuild for every fleet. A customer who sends their wallpaper instead of their crest is not
+   * doing anything unreasonable; the limit is what turns that into a sentence rather than into a
+   * slow build nobody attributes to anything.
+   *
+   * Written as a boundary test on both sides, because a limit tested only from above is satisfied
+   * by a compiler that refuses every logo.
+   */
+  const dir = mkdtempSync(join(tmpdir(), 'auros-logo-'));
+  try {
+    const withLogo = mutate(school(), (d) => {
+      (d['organisation'] as Doc)['logo'] = 'logo.png';
+    });
+    const recipePath = join(dir, 'recipe.yaml');
+    writeFileSync(recipePath, JSON.stringify(withLogo));
+
+    const LIMIT = 512 * 1024;
+    for (const [size, shouldThrow] of [[LIMIT + 1, true], [LIMIT * 2, true], [LIMIT, false], [LIMIT - 1, false], [1024, false]] as const) {
+      writeFileSync(join(dir, 'logo.png'), Buffer.alloc(size, 7));
+      const run = (): string => compileRaw({ recipe: { organisation: withLogo['organisation'] as Recipe['organisation'] }, recipePath }, withLogo);
+      if (shouldThrow) {
+        assert.throws(
+          run,
+          (err: unknown) => {
+            assert.match((err as Error).message, /The limit is 512 KB/);
+            assert.match((err as Error).message, /logo\.png is \d+ KB/, 'the refusal did not say how big the file actually is');
+            return true;
+          },
+          `a ${size}-byte logo was accepted`,
+        );
+      } else {
+        const text = run();
+        assert.match(text, /base64 -d > \/usr\/share\/auros\/branding\/logo\.png/, `a ${size}-byte logo did not reach the image`);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('compile refuses an ambiguous kiosk even when handed one directly', () => {
+  /*
+   * validate.ts refuses this first, with a sentence, and that refusal IS tested. This is the second
+   * copy of the rule -- the compiler's own -- and its whole reason for existing is the case where
+   * validation was bypassed. So it has to be called the way a bypass would call it.
+   *
+   * What the mutation does instead of throwing is pick candidates[0], which is the alphabetically
+   * first Flatpak REF. Two of the three browsers in the catalogue sort before Firefox, so a kiosk
+   * fleet quietly opens Chromium and every check that looks at what was removed still passes.
+   */
+  const twoBrowsers = mutate(kiosk(), (d) => { (d['apps'] as string[]).push('Chromium'); });
+  const path = join(ROOT, 'customers', 'example-kiosk', 'recipe.yaml');
+  const base = validateDocument(toolchain(), kiosk(), path);
+  assert.ok(base.ok, said(base));
+
+  assert.throws(
+    () =>
+      compile({
+        recipe: { ...base.recipe!, apps: twoBrowsers['apps'] as string[] },
+        recipePath: path,
+        plan: base.plan!,
+        fonts: base.fonts ?? [],
+        config,
+        catalogue: toolchain().catalogue,
+        baseDigest: DIGEST,
+        notes: base.notes,
+      }),
+    (err: unknown) => {
+      const message = (err as Error).message;
+      assert.match(message, /names 2 applications the machine could open/);
+      assert.match(message, /Chromium/, 'the refusal did not name both candidates');
+      assert.match(message, /Firefox/, 'the refusal did not name both candidates');
+      assert.match(message, /The compiler will not choose for you/);
+      return true;
+    },
+    'the compiler picked a winner for an ambiguous kiosk instead of stopping',
+  );
+
+  // And the validator says the same thing about the same recipe, so the two layers agree rather
+  // than one of them having quietly become the only one.
+  const viaValidator = validateDocument(toolchain(), twoBrowsers, path);
+  assert.equal(viaValidator.ok, false);
+  assert.match(said(viaValidator), /nothing here says which one it opens/);
+});
+
+test('a kiosk naming NO openable application stops the compiler too', () => {
+  // The other end of the same rule: candidates[0] is undefined, and a kiosk image that boots to a
+  // black screen would pass every check that only looks at what was removed.
+  const path = join(ROOT, 'customers', 'example-kiosk', 'recipe.yaml');
+  const base = validateDocument(toolchain(), kiosk(), path);
+  assert.ok(base.ok);
+  assert.throws(
+    () =>
+      compile({
+        recipe: { ...base.recipe!, apps: ['Calculator'] },
+        recipePath: path,
+        plan: base.plan!,
+        fonts: base.fonts ?? [],
+        config,
+        catalogue: toolchain().catalogue,
+        baseDigest: DIGEST,
+        notes: base.notes,
+      }),
+    /a kiosk needs an application to run|it is a brick/,
+  );
 });
