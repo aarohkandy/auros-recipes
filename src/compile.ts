@@ -459,6 +459,13 @@ export function compile(options: CompileOptions): string {
     [`${config.product}.prune.floor`, String(plan.floor)],
     [`${config.product}.prune.named`, String(plan.remove.length)],
     [`${config.product}.size-budget-gb`, String(recipe.size_budget_gb)],
+    // The three below exist so the CHECK MATRIX can be driven from the built artifact rather than
+    // from a workflow's memory of what the recipe said. run-matrix.sh wants --profiles, run-boot.sh
+    // wants --locale and --keymap for B4, and reading them off the image means the thing under test
+    // supplies the parameters of its own test. Before this, build-recipe.yml passed none of them.
+    [`${config.product}.test-profiles`, testProfiles(recipe).join(',')],
+    [`${config.product}.locale`, language.locale],
+    [`${config.product}.keymap`, primary.xkb.split(':')[0]!],
     [`${config.product}.source-date-epoch`, String(epoch)],
   ];
   labels.sort((a, b) => a[0].localeCompare(b[0]));
@@ -507,6 +514,35 @@ function xkbConf(layouts: string, toggle: string | undefined): string {
  * order. Exported because validate.ts refuses ambiguity using the same list, and two copies of
  * "which apps count" is how the validator and the compiler come to disagree about a fleet.
  */
+/**
+ * The QEMU profiles this fleet's image must be booted on, as the check matrix names them.
+ *
+ * WHY THIS IS IN THE COMPILER AND NOT ONLY IN A WORKFLOW. `hardware.also_test` was, until this
+ * function existed, a field that reached NOTHING. schema/README.md sells it as "adds a virtual test
+ * machine", README.md sells it as the reason "it cannot ask for less testing", and three example
+ * recipes set three different values -- and every one of them compiled to a byte-identical image
+ * definition. A recipe could say `also_test: [uefi-secureboot]` or say nothing at all and get the
+ * same build and the same tests. That is precisely the lie schema/README.md section 4 names: "a
+ * field the machine does not honour is a lie in a file whose whole claim is that it is the machine."
+ *
+ * So the profile list is stamped on the image as a label. CI reads it back off the built artifact
+ * with `podman inspect` and hands it to matrix/run/run-matrix.sh --profiles, which REQUIRES a recipe
+ * to name its profiles and dies otherwise ("a recipe must name its profiles"). The image therefore
+ * carries the statement of what it must survive, and the statement travels with the bytes rather
+ * than living in a workflow file that a different workflow can forget to copy.
+ *
+ * uefi-modern is ALWAYS in the list, whatever the recipe said. It is the profile the update group
+ * runs on, and a fleet that never boots the modern-firmware profile has not been tested on the
+ * machine the update path is proven on. The recipe may only ADD to this; the schema has no
+ * also_skip, and neither does this function.
+ */
+export const ALWAYS_TESTED_PROFILE = 'uefi-modern';
+
+export function testProfiles(recipe: Recipe): string[] {
+  const asked = recipe.hardware.also_test ?? [];
+  return [...new Set([ALWAYS_TESTED_PROFILE, ...asked])].sort().map((p) => token('a test profile id', p));
+}
+
 export function kioskCandidates(recipe: Recipe, catalogue: Catalogue): Array<{ name: string; ref: string }> {
   return recipe.apps
     .map((name) => catalogue.apps.get(name))

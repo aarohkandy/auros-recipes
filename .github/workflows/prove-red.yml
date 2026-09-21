@@ -1,0 +1,64 @@
+# THE TEST SUITE, TESTED.
+#
+# DECISIONS.md D19 says a step that cannot fail is not a check. D34 turned that into a mechanism for
+# auros-base — `tests/prove-red.sh`, 27 mutations, each required to make the suite that owns it go
+# red — and said why in one sentence: a test file that only demonstrates the happy path looks
+# identical to one that works.
+#
+# This is that mechanism for the recipe toolchain. On 2026-09-20 a mutation run against a GREEN
+# 433-test suite found thirty-two changes to src/ and scripts/ that no test noticed, including:
+#
+#   - the shipped prune runner collapsing its package list onto one line, so it removed NOTHING and
+#     exited 0 — byte-for-byte the SELinux kernel-argument bug, in the code that runs in the image;
+#   - the removal floor being lowerable by exactly one package per pull request;
+#   - a permission slip with no reason on it granting permission anyway;
+#   - the CI gate reporting a pass having examined zero fleets, and exiting 0 on a base ref it could
+#     not resolve.
+#
+# Nine of those were caught ONLY by the byte-for-byte Containerfile comparison, whose own failure
+# message tells the reader to regenerate the Containerfile. Doing what it says makes the suite green
+# and ships the bug. That is why this job exists separately from `pnpm test`: a green test run is
+# evidence that the code passes the assertions, and this is the evidence that the assertions would
+# disagree with wrong code.
+#
+# Adding a rule to src/ without adding a row here is allowed. Adding a row here that nothing catches
+# is not: the job fails, and it names the test that was supposed to understand the bug.
+name: prove-red
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+permissions:
+  contents: read
+
+jobs:
+  mutations:
+    runs-on: ubuntu-24.04
+    # Each mutation is a fresh scratch copy plus one or two test files, thirty-two times over, and
+    # every run is deliberately a real `node --test` rather than a unit-level stub. About 25 minutes.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      # The namespace file and hardware/compat.tsv live in the control repository. scripts/prove-red.mjs
+      # copies whatever is beside the repo into its scratch tree, and src/config.ts looks in
+      # .auros-meta/ — so checking it out here is what makes the scratch copy shaped like a real one.
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros, path: .auros-meta }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: corepack enable && pnpm install --frozen-lockfile
+
+      # The runner's own bash must be one the shipped prune script can run. test/prune.test.ts turns
+      # the absence of `mapfile` into a FAILURE when $CI is set, rather than a skip, so a runner image
+      # that lost bash 4 is a red build instead of seven tests quietly not running.
+      - name: The runner can run what we ship
+        run: bash --version | head -1 && bash -c 'type -t mapfile'
+
+      - name: Every mutation is caught by the test that owns it
+        run: node scripts/prove-red.mjs

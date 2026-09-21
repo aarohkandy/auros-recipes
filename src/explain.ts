@@ -26,6 +26,9 @@ import { baseReference } from './config.ts';
 import type { PrunePlan } from './prune.ts';
 import { desktopSettings, type Recipe } from './recipe.ts';
 import { sentenceList, wrap } from './refusal.ts';
+// One definition of the cadence, shared with the disclosure note validate.ts writes, because two
+// copies of a measured number is how one of them goes stale.
+import { UPDATE_CADENCE } from './validate.ts';
 
 export interface ExplainOptions {
   readonly recipe: Recipe;
@@ -212,7 +215,27 @@ export function explain(options: ExplainOptions): string {
     out.push(field('Guided first boot', `${desktop.guided_first_boot ? 'yes' : 'no'}`, 25));
   }
   out.push('');
-  out.push(field('Updates install between', `${recipe.updates?.install_between ?? '04:00-06:00 (the default)'}`, 25));
+  // THIS LINE USED TO BE A CLAIM WE DO NOT KEEP.
+  //
+  // It printed the customer's window as a fact -- "Updates install between  21:00-05:00" -- and,
+  // when the field was absent, invented "04:00-06:00 (the default)", a time that exists in no file
+  // in any of these repositories. This text becomes the pull request body and the order page: it is
+  // the thing the customer reads and agrees to. The image honours neither string.
+  //
+  // MEASURED: auros-base/update-agent/systemd/bootc-fetch-apply-updates.timer.d/10-auros.conf clears
+  // every trigger list the vendor unit carries, OnCalendar= among them, and sets OnBootSec=3min,
+  // OnUnitInactiveSec=6h, RandomizedDelaySec=10min. No calendar window exists on the machine,
+  // deliberately, so that check U1's twenty-minute propagation deadline can be met at any hour.
+  out.push(field('Update checks', `the machine ${UPDATE_CADENCE}`, 25));
+  out.push(
+    field(
+      'Your quiet window',
+      recipe.updates?.install_between
+        ? `${recipe.updates.install_between} -- RECORDED, NOT YET APPLIED`
+        : 'not requested (none is applied either way)',
+      25,
+    ),
+  );
   out.push('');
   out.push(
     para(

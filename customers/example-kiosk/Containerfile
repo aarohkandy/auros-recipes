@@ -48,9 +48,22 @@
 #   - hardware.models: 'lenovo-thinkcentre-m92p' has no row in hardware/compat.tsv yet. Allowed,
 #     and stamped on the build report and on the pull request as untested hardware, so it is a
 #     disclosed unknown rather than a skipped check.
+#   - prune.also_remove: bluetooth, developer tools, games, media players, office suite, remote
+#     desktop, sample wallpapers and media, usb storage, virtualisation and webcam are already
+#     removed by "keep only the applications above", which takes everything this catalogue can
+#     name that is not in the apps list. Naming them changes the wording of the build report and
+#     removes no further package. The list is kept because it is the record of what was asked for,
+#     and it starts doing the removing the moment keep_only_the_apps_above is false.
 #   - theme: recorded in the image as data. The desktop layer that reads it is not built yet, so
 #     the preset, accent, text scale and cursor size do not change how these machines look today.
 #     This is stamped on the build report rather than left for the customer to notice.
+#   - updates.install_between: '03:00-05:00' is recorded on the order and is NOT applied to
+#     these machines. The base checks for an update three minutes after boot and every six hours
+#     after that, with ten minutes of jitter, and carries no calendar window at all -- a fleet
+#     must be able to take a security rebuild within twenty minutes of it being published,
+#     whatever the hour. Honouring a quiet window and honouring that are different products. This
+#     is stamped on the build report rather than left for the customer to discover when a laptop
+#     restarts during a lesson.
 # =================================================================================================
 
 ARG BASE=ghcr.io/aarohkandy/auros-base:hardened
@@ -155,6 +168,8 @@ RUN /usr/libexec/auros/auros-prune
 # Labels last, so editing one does not invalidate the cache for every step above it.
 # -------------------------------------------------------------------------------------------------
 LABEL \
+    auros.keymap="us" \
+    auros.locale="en_US.UTF-8" \
     auros.machines="40" \
     auros.policy="kiosk" \
     auros.prune.floor="1100" \
@@ -162,6 +177,7 @@ LABEL \
     auros.recipe="example-kiosk" \
     auros.size-budget-gb="4" \
     auros.source-date-epoch="1789603200" \
+    auros.test-profiles="bios-legacy,small-disk,uefi-modern" \
     org.opencontainers.image.base.name="ghcr.io/aarohkandy/auros-base:hardened" \
     org.opencontainers.image.source="https://github.com/aarohkandy/auros-recipes" \
     org.opencontainers.image.title="ghcr.io/aarohkandy/auros-example-kiosk" \

@@ -45,6 +45,13 @@
 #   - theme: recorded in the image as data. The desktop layer that reads it is not built yet, so
 #     the preset, accent, text scale and cursor size do not change how these machines look today.
 #     This is stamped on the build report rather than left for the customer to notice.
+#   - updates.install_between: '04:00-06:00' is recorded on the order and is NOT applied to
+#     these machines. The base checks for an update three minutes after boot and every six hours
+#     after that, with ten minutes of jitter, and carries no calendar window at all -- a fleet
+#     must be able to take a security rebuild within twenty minutes of it being published,
+#     whatever the hour. Honouring a quiet window and honouring that are different products. This
+#     is stamped on the build report rather than left for the customer to discover when a laptop
+#     restarts during a lesson.
 # =================================================================================================
 
 ARG BASE=ghcr.io/aarohkandy/auros-base:hardened
@@ -152,6 +159,8 @@ RUN /usr/libexec/auros/auros-prune
 # Labels last, so editing one does not invalidate the cache for every step above it.
 # -------------------------------------------------------------------------------------------------
 LABEL \
+    auros.keymap="gb" \
+    auros.locale="en_GB.UTF-8" \
     auros.machines="1" \
     auros.policy="open" \
     auros.prune.floor="40" \
@@ -159,6 +168,7 @@ LABEL \
     auros.recipe="example-workstation" \
     auros.size-budget-gb="24" \
     auros.source-date-epoch="1789862400" \
+    auros.test-profiles="uefi-modern,uefi-secureboot" \
     org.opencontainers.image.base.name="ghcr.io/aarohkandy/auros-base:hardened" \
     org.opencontainers.image.source="https://github.com/aarohkandy/auros-recipes" \
     org.opencontainers.image.title="ghcr.io/aarohkandy/auros-example-workstation" \

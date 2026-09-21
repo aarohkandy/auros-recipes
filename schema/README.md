@@ -119,8 +119,8 @@ theme:
   text_scale: 1.1                  # become two different images. 1.1 because these are small screens.
 
 updates:
-  install_between: "21:00-05:00"   # when a waiting patch lands. Note what is missing: there is no
-                                   # way to switch updating off. See §3.
+  install_between: "21:00-05:00"   # RECORDED, NOT YET APPLIED — see the note below. Note what is
+                                   # missing: there is no way to switch updating off. See §3.
 
 first_boot_message: नमस्कार! काही अडचण असल्यास शिक्षकांना सांगा.
                                    # the first sentence a stranger reads, in their language. It is
@@ -173,15 +173,15 @@ rules running ahead of the real ones.
 | `timezone` | yes | The clock. | Offsets, `auto`, `local`, `geoip`. |
 | `apps` | yes | Everything installed, in human names. Doubles as the keep list. | Any digit; any raw package or Flatpak identifier; any name not in the catalogue, answered with the nearest matches. |
 | `prune.keep_only_the_apps_above` | yes | The entire "and nothing else" instruction. | — |
-| `prune.also_keep` | no | Capabilities, not packages. Keeping one file out of a printing stack gives you a printer that prints nothing. | Package names. |
-| `prune.also_remove` | with `keep_only:false` | Named groups from a published list. | Anything outside that list. Accessibility tools are refused **by name, with a sentence**, not quietly ignored. |
+| `prune.also_keep` | with `keep_only:true` | Capabilities, not packages. Keeping one file out of a printing stack gives you a printer that prints nothing. | Package names. Being set at all when `keep_only_the_apps_above` is false — with no sweep there is nothing to rescue, and a line that protects nothing while reading like protection is refused rather than accepted. |
+| `prune.also_remove` | with `keep_only:false` | Named groups from a published list. Under `keep_only:true` it is the *record of what was asked for* and removes nothing further — the sweep has already taken every one of those packages, and validation says so on the build report. | Anything outside that list. Accessibility tools are refused **by name, with a sentence**, not quietly ignored. |
 | `prune.must_remove_at_least` | yes | A floor. Fewer removed ⇒ the build fails. | Zero. A recipe that removes nothing is not a recipe we build. |
 | `policy` | yes | `open` / `managed` / `locked` / `kiosk`. | A fifth value. A mode we cannot prove is in force on a booted machine is a mode we cannot sell. |
 | `desktop` | no | The Windows-shaped layer, one readable line per behaviour. All default to the familiar answer. | Being present at all under `kiosk`. A terminal on anything but `open`. Contradicting `locked`. |
 | `kiosk` | with `policy: kiosk` | What the one window shows, where it may go, how long before the session is wiped. | Being present under any other policy. `http://`, `file://`, `data:`, a username in the address, a query string. An empty allow-list — a kiosk that can reach nothing is broken, not secure. |
 | `windows_apps` | no | The honest `.exe` capability. | Being present under `kiosk` (the compatibility layer is a desktop application and there is no desktop). A result of `works` with no note. Any list of tested programs while the layer is off. |
 | `theme` | no | Preset, accent, text size, pointer size. | Capital letters in hex. A stylesheet or theme archive — that is arbitrary content; a preset plus a colour is not. |
-| `updates` | no | The nightly window. | There is no field to switch updating off, and no field to stay on an older image. |
+| `updates` | no | The window you would like patches to land in. **Recorded on the order and not yet applied** — see below. | There is no field to switch updating off, and no field to stay on an older image. |
 | `first_boot_message` | no | The first sentence a stranger reads. | Control characters, direction overrides, and text in a script the chosen language's fonts cannot draw. A first-boot screen of empty boxes is the worst possible first impression. |
 | `size_budget_gb` | yes | The size you are buying. | — |
 | `approved_by` | yes | A named human, plus a reference to the approval record kept elsewhere. | `enrolment: pending` blocks publishing but still test-builds — which is exactly what "charged only once the test build passes" needs. |
@@ -306,6 +306,26 @@ the other 175 follow next week". That is not a version pin — every machine tak
 in the same hour — and it is a real requirement for a school in week three of term. It is deliberately
 absent rather than present-and-ignored, because a field the machine does not honour is a lie in a file
 whose whole claim is that it is the machine. It arrives with the fleet console.
+
+**`updates.install_between` is recorded and not yet applied**, and this section is where that
+admission belongs, because the paragraph above it is the rule it breaks. The field has been in this
+form since the first version and no machine has ever honoured it. What the base actually does, read
+out of `auros-base/update-agent/systemd/bootc-fetch-apply-updates.timer.d/10-auros.conf` rather than
+remembered: it clears every trigger the vendor unit carries — `OnCalendar=` among them — and then
+<!-- auros-allow: measured, not estimated — these three numbers are the literal OnBootSec=3min, OnUnitInactiveSec=6h and RandomizedDelaySec=10min in auros-base/update-agent/systemd/bootc-fetch-apply-updates.timer.d/10-auros.conf. -->
+checks three minutes after switch-on and every six hours after that, with ten minutes of jitter so a
+180-machine school does not pull 3.5 GB simultaneously. There is no calendar window on an Auros
+machine at all.
+
+That is deliberate and it is not obviously wrong: a fleet has to be able to take a security rebuild
+<!-- auros-allow: measured — twenty minutes is check U1's stated window in docs/SPEC.md §6A, not an estimate of anything. -->
+within twenty minutes of it being published, at whatever hour it is published, and a quiet window is
+in direct tension with that. Which of the two wins is a decision for a person. Until somebody makes
+it, every recipe that sets the field carries a line on its build report and in its pull request
+saying it is not applied, and `explain` prints `RECORDED, NOT YET APPLIED` rather than a time. It was
+found by compiling all three example recipes and asserting that every difference in their YAML
+produces a difference in the image — `test/differ.test.ts` — which is also what found
+`hardware.also_test` reaching nothing and `prune.also_keep` protecting nothing.
 
 **One recipe describes one uniform fleet.** A computer lab and a set of classroom carts that genuinely
 need different software are, today, two recipes. We have not decided whether that stays the answer.

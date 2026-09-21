@@ -49,6 +49,18 @@ import { desktopSettings, type Recipe } from './recipe.ts';
 import { nearest, pointer, refuse, sentenceList, type Refusal } from './refusal.ts';
 import { auditScripts, SCRIPT_REFUSAL_WHY, scriptRefusalText } from './scripts.ts';
 
+/**
+ * The base's real update cadence, and U1's deadline, in one place and in the customer's words.
+ *
+ * Stated once because they are quoted in three places -- this file's disclosure note, explain's
+ * output, and schema/README.md -- and three copies of a measured number is how one of them becomes
+ * wrong. Read out of the artifact, never remembered.
+ */
+// auros-allow: measured, not estimated — these three numbers are the literal OnBootSec=3min, OnUnitInactiveSec=6h and RandomizedDelaySec=10min in auros-base/update-agent/systemd/bootc-fetch-apply-updates.timer.d/10-auros.conf.
+export const UPDATE_CADENCE = 'checks for an update three minutes after boot and every six hours after that, with ten minutes of jitter';
+// auros-allow: measured — twenty minutes is check U1's stated window in docs/SPEC.md §6A, not an estimate of anything.
+export const U1_WINDOW = 'within twenty minutes';
+
 export interface ValidationResult {
   readonly ok: boolean;
   readonly refusals: ReadonlyArray<Refusal>;
@@ -336,6 +348,33 @@ function appRefusals(recipe: Recipe, catalogue: Catalogue, out: Refusal[]): void
 
 function pruneRefusals(recipe: Recipe, out: Refusal[]): void {
   const keep = new Set(recipe.prune.also_keep ?? []);
+
+  // also_keep ONLY means something under keep_only_the_apps_above: true.
+  //
+  // With keep_only false, nothing is swept, so there is nothing for a keep list to rescue: the
+  // groups named here are exactly as installed with the field as without it. Proven by compiling
+  // example-workstation (keep_only: false) with also_keep: [printing] and with also_keep:
+  // [scanning] and with the field absent -- three byte-identical Containerfiles.
+  //
+  // Refused rather than noted, because unlike theme and updates.install_between this one is not a
+  // feature waiting on an unbuilt layer. It is a request that has no meaning in the file it was
+  // written in, and the person who wrote it believes they have protected their printers. The
+  // schema's own principle: absent rather than present-and-ignored.
+  if (recipe.prune.keep_only_the_apps_above === false && keep.size > 0) {
+    out.push(
+      refuse(
+        'prune.also_keep',
+        `also_keep names ${sentenceList([...keep])}, and keep_only_the_apps_above is false.`,
+        'also_keep rescues capabilities from the sweep that "keep only the applications above" ' +
+          'performs. With keep_only_the_apps_above false there is no sweep, so this line protects ' +
+          'nothing and changes nothing about the image -- which is worse than leaving it out, ' +
+          'because it reads like protection. Either set keep_only_the_apps_above: true, and the ' +
+          'keep list starts doing what it says, or delete this line: those groups are already ' +
+          'installed and nothing is coming for them.',
+      ),
+    );
+  }
+
   for (const group of recipe.prune.also_remove ?? []) {
     if (keep.has(group)) {
       out.push(
@@ -599,8 +638,72 @@ export function validateDocument(tool: Toolchain, doc: unknown, recipePath: stri
     );
   }
 
+  // The SECOND field that reaches the image as nothing, found the same way as the theme one: by
+  // compiling all three example recipes and asserting that every YAML difference between them shows
+  // up somewhere in the generated Containerfile. Three recipes declare three different update
+  // windows -- 21:00-05:00, 03:00-05:00, 04:00-06:00 -- and all three compile to an image definition
+  // that is byte-identical in that respect, because nothing in the compiler reads the field. Only
+  // `explain` prints it, which means the customer is TOLD a window that the machine does not keep.
+  //
+  // MEASURED, not assumed, in auros-base/update-agent/systemd/bootc-fetch-apply-updates.timer.d/
+  // 10-auros.conf: the base resets every trigger list the vendor unit carries (OnCalendar= among
+  // them) and then sets OnBootSec=3min, OnUnitInactiveSec=6h, RandomizedDelaySec=10min. There is no
+  // calendar window on an Auros machine at all, and that is deliberate -- check U1 requires a fleet
+  // to pull, stage and reboot within twenty minutes of the base moving, at whatever hour the base
+  // moves. So this is not merely an unbuilt feature: a recipe layer that wrote the customer's window
+  // into an OnCalendar= would break the propagation guarantee the whole architecture rests on.
+  //
+  // Which of those two wins is a design decision for a human, not something a validator settles at
+  // eleven at night. What a validator CAN do is stop the file from claiming it.
+  if (recipe.updates?.install_between) {
+    notes.push(
+      `updates.install_between: '${recipe.updates.install_between}' is recorded on the order and is ` +
+        `NOT applied to these machines. The base ${UPDATE_CADENCE}, and carries no calendar window at ` +
+        `all -- a fleet must be able to take a security rebuild ${U1_WINDOW} of it being ` +
+        'published, whatever the hour. Honouring a quiet window and honouring that are different ' +
+        'products. This is stamped on the build report rather than left for the customer to discover ' +
+        'when a laptop restarts during a lesson.',
+    );
+  }
+
   const plan = planPrune(recipe, tool.catalogue, fonts);
   refusals.push(...plan.violations);
+
+  // THE THIRD ONE, AND THE ONE THAT MATTERS MOST, BECAUSE IT HIDES BEHIND A REAL DIFFERENCE.
+  //
+  // Under keep_only_the_apps_above: true, `also_remove` cannot remove a single package that the
+  // sweep would not already have taken. That is a property of planPrune, not a coincidence of these
+  // three recipes: the keep-only universe is every group member plus every catalogue application,
+  // `also_remove` draws from membersOf(catalogue, group), and a group member is by construction in
+  // that universe. The only way a named group could add something is if the package were in the keep
+  // set -- and a recipe that installs an application and removes its group is already refused, by
+  // name, in appRefusals.
+  //
+  // MEASURED: emptying also_remove on example-school takes the removal plan from 52 packages to 52,
+  // and on example-kiosk from 57 to 57. Zero difference. The kiosk recipe names ten groups. Five of
+  // them are the only thing distinguishing its prune block from the school's.
+  //
+  // This is subtler than theme and updates.install_between, and it evaded the pairwise differ test
+  // that found those two: naming a group DOES change the compiled Containerfile, because every
+  // removal carries a `reason` string into prune-plan.json and the reason for a named group differs
+  // from the reason for a keep-only sweep. So the bytes differ, the image is identical, and the
+  // customer reads a build report that credits their decision for something the "and nothing else"
+  // line had already done. Spec section 2: subtraction is the product. A field that appears to
+  // subtract and does not is the worst place in this file for a lie to sit.
+  //
+  // Disclosed rather than refused: the list is not meaningless, it is the customer's statement of
+  // intent, and it becomes load-bearing the moment keep_only is turned off. What must not stand is
+  // the impression that it is doing the removing.
+  if (recipe.prune.keep_only_the_apps_above && (recipe.prune.also_remove ?? []).length > 0) {
+    const named = [...(recipe.prune.also_remove ?? [])].sort();
+    notes.push(
+      `prune.also_remove: ${sentenceList(named)} ${named.length === 1 ? 'is' : 'are'} already removed by ` +
+        '"keep only the applications above", which takes everything this catalogue can name that is ' +
+        'not in the apps list. Naming them changes the wording of the build report and removes no ' +
+        'further package. The list is kept because it is the record of what was asked for, and it ' +
+        'starts doing the removing the moment keep_only_the_apps_above is false.',
+    );
+  }
 
   if (refusals.length > 0) return { ok: false, refusals, notes };
   return { ok: true, refusals, notes, recipe, plan, fonts };

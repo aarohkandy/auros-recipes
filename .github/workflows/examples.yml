@@ -1,0 +1,249 @@
+# Build ALL THREE example recipes against one base image, and prove they differ correctly.
+#
+# ── WHY THIS IS A SEPARATE WORKFLOW ──────────────────────────────────────────────────────────────
+#
+# Spec section 6B's exit condition is that three visibly different recipes "build from the same base,
+# boot, and differ in every way the YAML says they should and IN NO WAY IT DOESN'T." build-recipe.yml
+# builds ONE recipe and can say nothing about the last clause: a difference between two images is not
+# observable from inside a job that only ever holds one of them.
+#
+# So this workflow holds all three. It is `workflow_dispatch` only, takes the base image as an input,
+# and PUBLISHES NOTHING — no registry login, no push, no lockfile, no ledger write. It answers one
+# question and produces artifacts.
+#
+# ── THE MOMENT THE HARDENED BASE PUBLISHES, THIS IS ONE COMMAND ──────────────────────────────────
+#
+#   gh workflow run examples.yml -f base_image=ghcr.io/aarohkandy/auros-base@sha256:<digest>
+#
+# Pass a DIGEST rather than a tag when you can. A tag is a moving target and this workflow's whole
+# output is a comparison; three images built from two different bases half an hour apart are not a
+# comparison of recipes.
+#
+# ── WHAT IT CHECKS, IN THE ORDER THE ANSWERS STOP BEING CHEAP ────────────────────────────────────
+#
+#   1. compile       the three recipes compile, the committed Containerfiles have not drifted, and
+#                    test/differ.test.ts passes — the YAML-level half of the exit condition. Seconds,
+#                    no podman, no base image. It runs first because a difference that is already
+#                    wrong on paper is not worth an hour of QEMU.
+#   2. build         three images from ONE base, with `--build-arg BASE=<input>` — the single
+#                    documented override, the same one the replaceability page hands a customer.
+#   3. differ        the part that needed the base: `rpm -qa` out of each built image, compared to
+#                    each other AND to the removal plan the compiler wrote. This is where a prune
+#                    that was correct in the plan and wrong in the image shows up. Nothing before
+#                    this point has ever looked at a package database.
+#   4. matrix        optional, and slow: the real check matrix per recipe, on the profiles each
+#                    recipe declared in hardware.also_test.
+name: examples
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_image:
+        required: true
+        type: string
+        description: 'Base image to build all three examples FROM — prefer ghcr.io/aarohkandy/auros-base@sha256:… over a tag.'
+      run_matrix:
+        required: false
+        type: boolean
+        default: false
+        description: 'Also run the full check matrix per recipe (slow: QEMU boots on every profile each recipe declares). The comparison in job 3 does not need it.'
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}   # D19. A step that cannot fail is not a check.
+
+# Read-only. This workflow exists to compare, and a workflow that cannot write cannot publish by
+# accident. `exactly one workflow can put an image in the registry` in test/workflows.test.ts is the
+# assertion that keeps this true.
+permissions:
+  contents: read
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # 1. The paper answer. No podman, no base image, no excuse for it to be slow.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros, path: .auros-meta }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: corepack enable && pnpm install --frozen-lockfile
+
+      - name: Validate and compile all three, and refuse on drift
+        run: |
+          node dist/cli.js validate --all
+          for r in example-kiosk example-school example-workstation; do
+            node dist/cli.js compile "customers/$r/recipe.yaml" > "/tmp/$r.Containerfile"
+            # D28: the committed file is the one a customer rebuilds from, so a stale one is worse
+            # than none at all.
+            diff -u "customers/$r/Containerfile" "/tmp/$r.Containerfile" \
+              || { echo "::error::customers/$r/Containerfile has drifted from its recipe"; exit 1; }
+          done
+
+      - name: The differ suite — every difference traces to YAML, and every YAML difference lands
+        run: node --test test/differ.test.ts
+
+      - name: And watch it fail on purpose (D34)
+        run: node scripts/prove-red-differ.mjs
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # 2. Three images, one base. Nothing is pushed anywhere.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  build:
+    needs: compile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false          # one recipe failing must not hide what the other two did
+      matrix:
+        recipe: [example-kiosk, example-school, example-workstation]
+    env:
+      RECIPE: ${{ matrix.recipe }}
+      BASE_IMAGE: ${{ inputs.base_image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros, path: .auros-meta }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: corepack enable && pnpm install --frozen-lockfile
+
+      - name: Reclaim disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          sudo docker system prune -af --volumes >/dev/null 2>&1 || true
+          df -h /
+
+      - name: Build from the committed Containerfile, against the base this run was given
+        run: |
+          # The COMMITTED file, not a freshly compiled one. The compile job already proved they are
+          # the same, and building the committed artifact is the command the replaceability page
+          # gives a customer — so this run exercises the promise rather than a private path.
+          #
+          # --build-arg BASE is the one override that exists, and it is deliberately not reachable
+          # from recipe.yaml: nothing a customer can write puts their fleet on a different
+          # foundation. Here it is a CI operator naming a base by hand, which is the case it exists
+          # for.
+          #
+          # ASSERTED BEFORE THE BUILD, NOT HOPED FOR AFTER IT. `podman build` accepts a --build-arg
+          # the Containerfile never declares and says nothing about it, so a renamed or removed ARG
+          # would leave all three images on the compiled-in default while this workflow reported a
+          # clean comparison of images nobody asked for. One grep closes that.
+          C="customers/${RECIPE}/Containerfile"
+          grep -qE '^ARG BASE=' "$C" || {
+            echo "::error::$C declares no 'ARG BASE=', so --build-arg BASE would be accepted and ignored, and this run would compare images built from the wrong base."
+            exit 1
+          }
+          grep -qxF 'FROM ${BASE}' "$C" || {
+            echo "::error::$C does not take its FROM from \${BASE}. The override exists but nothing uses it."
+            exit 1
+          }
+          sudo podman build --build-arg "BASE=${BASE_IMAGE}" \
+            -t "localhost/${RECIPE}:examples" -f "$C" .
+
+      - name: Take the package list and the removal plan out of the image
+        run: |
+          mkdir -p out
+          IMG="localhost/${RECIPE}:examples"
+          sudo podman run --rm --entrypoint= "$IMG" rpm -qa --qf '%{NAME}\n' | sort -u > "out/${RECIPE}.rpms"
+          sudo podman run --rm --entrypoint= "$IMG" cat /usr/share/auros/prune-plan.json > "out/${RECIPE}.plan.json"
+          sudo podman inspect "$IMG" --format '{{ json .Labels }}' > "out/${RECIPE}.labels.json"
+          wc -l "out/${RECIPE}.rpms"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-facts-${{ matrix.recipe }}
+          path: out/
+          if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # 3. THE PART THAT NEEDED THE BASE. Three package databases, compared.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  differ:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: actions/download-artifact@v4
+        with: { pattern: image-facts-*, path: facts, merge-multiple: true }
+
+      - name: Every package a recipe planned to remove is gone, and the three images differ
+        run: node scripts/compare-images.mjs facts
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: image-comparison, path: facts/, if-no-files-found: error }
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # 4. The real check matrix, per recipe, on the profiles that recipe declared. Opt-in: slow.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  matrix:
+    needs: build
+    if: inputs.run_matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: [example-kiosk, example-school, example-workstation]
+    env:
+      RECIPE: ${{ matrix.recipe }}
+      BASE_IMAGE: ${{ inputs.base_image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros-base, path: .auros-base }
+      - uses: actions/checkout@v4
+        with: { repository: aarohkandy/auros, path: .auros-meta }
+
+      - name: Rebuild the image on this runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          sudo podman build --build-arg "BASE=${BASE_IMAGE}" \
+            -t "localhost/${RECIPE}:examples" -f "customers/${RECIPE}/Containerfile" .
+
+      # Same shape as build-recipe.yml: the parameters of the test come off the artifact under test,
+      # and matrix/run.sh is the entry point — with its real flags, read from --help rather than
+      # remembered. The three positional calls that used to live in build-recipe.yml answered
+      # `FATAL: unknown argument` and exited 2.
+      - name: Static and boot, on every profile this recipe declared
+        run: |
+          sudo chmod 666 /dev/kvm || true
+          IMG="localhost/${RECIPE}:examples"
+          M=.auros-base/matrix/run.sh
+          label() { sudo podman inspect "$IMG" --format "{{ index .Labels \"$1\" }}"; }
+          PROFILES=$(label auros.test-profiles)
+          [ -n "$PROFILES" ] || { echo "::error::$IMG carries no auros.test-profiles label"; exit 1; }
+          POLICY=$(label auros.policy); LOCALE=$(label auros.locale); KEYMAP=$(label auros.keymap)
+          mkdir -p fragments
+
+          declare -a FLATPAK_ARGS=()
+          read -r -a FLATPAK_ARGS < <(
+            sudo podman run --rm --entrypoint= "$IMG" sh -c 'cat /etc/flatpak/preinstall.d/*.preinstall 2>/dev/null || true' \
+              | sed -n 's/^\[Flatpak Preinstall \(.*\)\]$/--flatpak-ref \1/p' | tr '\n' ' '
+          ) || true
+
+          sudo -E "$M" --phase static --image "$IMG" --out fragments/static.json \
+            -- --recipe "$RECIPE" --policy "$POLICY" ${FLATPAK_ARGS[@]+"${FLATPAK_ARGS[@]}"}
+
+          IFS=',' read -r -a PROFILE_LIST <<< "$PROFILES"
+          echo "booting ${RECIPE} on: ${PROFILE_LIST[*]}"
+          for p in "${PROFILE_LIST[@]}"; do
+            sudo -E "$M" --phase boot --profile "$p" --image "$IMG" --out "fragments/boot-$p.json" \
+              -- --recipe "$RECIPE" --policy "$POLICY" --locale "$LOCALE" --keymap "$KEYMAP" \
+                 ${FLATPAK_ARGS[@]+"${FLATPAK_ARGS[@]}"}
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: matrix-fragments-${{ matrix.recipe }}
+          path: fragments/
+          if-no-files-found: error
