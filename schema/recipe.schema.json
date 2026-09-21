@@ -63,7 +63,7 @@
           "$ref": "#/$defs/line"
         },
         "helpdesk": {
-          "description": "The desk a user is told to contact, printed under the start menu's Help entry and shown at first boot. Give a role and a desk line, never an individual's personal mobile: this repository is public on purpose.",
+          "description": "The desk a user is told to contact, printed under the start menu's Help entry and shown at first boot. Give a role and a desk line, never an individual's personal mobile: this repository is public and anyone can read it.",
           "type": "object",
           "additionalProperties": false,
           "required": [
