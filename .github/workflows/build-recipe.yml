@@ -259,6 +259,30 @@ jobs:
           [ -n "$D" ] || { echo "::error::cannot resolve a digest for the candidate image. A pass binds to a digest, never to a tag."; exit 1; }
           echo "digest=$D" >> $GITHUB_OUTPUT
 
+      # Same pinned cosign as auros-base, read from the same lock (D17). A recipe image is signed with
+      # the base's key because it inherits the base's policy.json — see scripts/sign-recipe.sh.
+      - name: Read auros-base/signing/cosign.lock — the only place a cosign version is written
+        id: cosign
+        if: inputs.publish && github.ref == 'refs/heads/main'
+        run: |
+          set -a; . .auros-base/signing/cosign.lock; set +a
+          : "${COSIGN_VERSION:?auros-base/signing/cosign.lock has no COSIGN_VERSION}"
+          echo "version=${COSIGN_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "flag=${COSIGN_BUNDLE_FORMAT_FLAG:-}" >> "$GITHUB_OUTPUT"
+          echo "pubkey_in_image=${COSIGN_PUBKEY_IN_IMAGE:-}" >> "$GITHUB_OUTPUT"
+          # `uses:` cannot be an expression, so the action ref below is written out. This stops it
+          # drifting from the lock silently — the same assertion auros-base build.yml makes.
+          WANT="sigstore/cosign-installer@v4.1.2"
+          if [ "${COSIGN_INSTALLER_ACTION:-$WANT}" != "$WANT" ]; then
+            echo "::error::auros-base/signing/cosign.lock names ${COSIGN_INSTALLER_ACTION}, but build-recipe.yml pins ${WANT}. Update the uses: line below to match the lock."
+            exit 1
+          fi
+
+      - uses: sigstore/cosign-installer@v4.1.2
+        if: inputs.publish && github.ref == 'refs/heads/main'
+        with:
+          cosign-release: ${{ steps.cosign.outputs.version }}
+
       # THE REF GUARD IS PART OF THE GATE, not a convenience. See the header of this file for what
       # reached this step before it existed. `inputs.publish` is the caller's stated intent;
       # `github.ref` is where the code came from, and a caller cannot assert it.
@@ -266,6 +290,10 @@ jobs:
         if: inputs.publish && github.ref == 'refs/heads/main'
         env:
           DIGEST: ${{ steps.digest.outputs.digest }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          BUNDLE_FLAG: ${{ steps.cosign.outputs.flag }}
+          PUBKEY_IN_IMAGE: ${{ steps.cosign.outputs.pubkey_in_image }}
         run: |
           # This step was wrong in an instructive way and tools/gate.test.mjs caught it.
           #
@@ -337,6 +365,13 @@ jobs:
           REGISTRY=$(jq -r .registry .auros-meta/auros.config.json)
           echo "${{ github.token }}" | sudo podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
 
+          # SIGNING PREFLIGHT, BEFORE ANYTHING REACHES THE REGISTRY. Refuses a development-key image,
+          # a missing COSIGN_PRIVATE_KEY, or a key that does not match the public key inside the
+          # image. The push below lands in a namespace whose policy requires a signature; an unsigned
+          # recipe image there is refused by every machine, forever, silently (SYSTEM-REVIEW §2.1).
+          export CANDIDATE="localhost/${RECIPE}:candidate"
+          scripts/sign-recipe.sh preflight
+
           # PUBLISH THE DIGEST THE GATE CLEARED, not "whatever is under that local tag now".
           # `podman push <tag> <dest>` re-uploads the bytes the tag points at, and the thing the
           # ledger cleared is a digest. They are the same today and there is no step between them
@@ -349,6 +384,13 @@ jobs:
             exit 1
           fi
           echo "published ${IMAGE}:latest at $PUSHED — the digest the ledger cleared"
+
+          # SIGN WHAT WAS PUSHED, then assert it verifies against the image's own public key and that
+          # the .sig tag is discoverable (auros-base S8). cosign and skopeo run as the runner user and
+          # the login above was root's, so they log in for themselves.
+          echo "${{ github.token }}" | cosign login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          echo "${{ github.token }}" | skopeo login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          IMAGE="$IMAGE" scripts/sign-recipe.sh sign
 
       # THE LOCKFILE LIVES OUTSIDE customers/, AND THAT IS A SECURITY BOUNDARY, NOT TIDINESS.
       #
