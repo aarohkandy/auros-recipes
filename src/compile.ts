@@ -133,31 +133,44 @@ export function resolveSourceDateEpoch(recipe: Recipe, env: NodeJS.ProcessEnv = 
   return 0;
 }
 
+/** Where the base pin lives: committed, written only by propagate.yml, refused in a pull request. */
+export const BASE_PIN = '.locks/base.digest';
+
 /**
- * The base digest for THIS build, and the only place it may come from.
+ * The base digest every fleet is pinned to, read from the COMMITTED file `.locks/base.digest`.
  *
  * A recipe cannot pin a base -- there is no field for it, and a recipe-level pin would freeze that
- * customer off the rebuild that carries the next security fix. The pin for one build is the digest
- * the base is published at RIGHT NOW, resolved by the caller and handed to this toolchain in
- * $AUROS_BASE_DIGEST. It lives for one build; the recipe never sees it.
+ * customer off the rebuild that carries the next security fix. There is one pin for the whole
+ * repository. propagate.yml writes it when the base publishes and, in the same commit, regenerates
+ * every Containerfile against it; the next poll rebuilds each fleet from those committed files.
  *
- * WHY THIS READS NO FILE. It used to also read `base.lock` from the recipe's own directory. That
- * directory is the inside of a pull request from a stranger: two lines beside recipe.yaml pinned a
- * fleet to a digest of the author's choosing, under a generated header that said the digest had been
- * "published when this build started" -- which nothing had checked and nothing had published. Worse,
- * propagate.yml decides a recipe is up to date by looking for the published digest in its lockfile,
- * so a lockfile naming today's digest made that fleet permanently not-stale: never rebuilt, never
- * patched. That is the abandoned machine this product exists to prevent.
+ * WHY A COMMITTED FILE AND NOT THE ENVIRONMENT (SYSTEM-REVIEW §2.11). This used to read
+ * $AUROS_BASE_DIGEST, a per-build value. A Containerfile compiled with it differed from the committed
+ * one, so the D28 drift check failed every pinned build -- the per-build pin and the committed
+ * Containerfile could not both hold. Reading only committed files makes compile a pure function of
+ * the repository, so the drift check stays meaningful and the committed file carries the digest a
+ * customer rebuilding without us actually needs.
  *
- * So the lockfile moved out of customers/ to .locks/<name>.lock, which CI writes and a pull request
- * may not touch (see scripts/ci-owned-files.mjs and .github/workflows/pull-request.yml), and this
- * function reads the environment and nothing else. A digest the caller did not supply is not a
- * digest: the FROM line falls back to the tag and the header says so in those words.
+ * WHY NOT customers/. That directory is the inside of a pull request from a stranger: a lockfile there
+ * used to pin a fleet to a digest of the author's choosing. .locks/ is refused in any pull request
+ * (scripts/ci-owned-files.mjs), and src/validate.ts refuses stray files in a recipe folder.
+ *
+ * No file: no pin, and the header says so. A file that is not exactly one digest is an error, never a
+ * quiet fall back to the tag -- an unpinned build that looked pinned is how a rebuild stops moving.
  */
-export function resolveBaseDigest(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const fromEnv = env['AUROS_BASE_DIGEST'];
-  if (fromEnv && /^sha256:[0-9a-f]{64}$/.test(fromEnv)) return fromEnv;
-  return undefined;
+export function resolveBaseDigest(root: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(join(root, BASE_PIN), 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+  const digest = text.endsWith('\n') ? text.slice(0, -1) : text;
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+    throw new Error(`${BASE_PIN} does not hold exactly one sha256 digest, so no build may claim to be pinned by it: ${JSON.stringify(text.slice(0, 80))}`);
+  }
+  return digest;
 }
 
 const RULE = '# ' + '-'.repeat(97);
@@ -188,7 +201,7 @@ export function compile(options: CompileOptions): string {
         '',
         `  recipe            ${recipe.name}`,
         `  base image        ${base}`,
-        `  base pinned by    ${options.baseDigest ? '$AUROS_BASE_DIGEST, resolved from the registry by the caller of this compiler' : 'tag only -- no digest was supplied to the compiler, so none is claimed here'}`,
+        `  base pinned by    ${options.baseDigest ? `${BASE_PIN}, committed, written by propagate.yml when the base publishes` : `tag only -- ${BASE_PIN} is not committed, so no digest is claimed here`}`,
         `  namespace from    ${basename(config.configPath)} (the one file that holds it)`,
         `  SOURCE_DATE_EPOCH ${epoch}${epochGiven ? ' (given to the compiler)' : ` (midnight UTC on ${recipe.approved_by.date}, the recipe's approval date)`}`,
         `  architecture      ${config.arch}`,
@@ -205,9 +218,9 @@ export function compile(options: CompileOptions): string {
         'yourself from its public repository, and you need this file to point at your copy. Without it',
         'that instruction would be a command that cannot work, which is worse than no instruction.',
         '',
-        'The digest pin is for this build only. When the base moves, propagation notices this recipe is',
-        'stale and rebuilds it against the new digest. A pin that lived in the recipe would freeze this',
-        'organisation off the rebuild that carries the next security fix.',
+        'The digest pin is one committed file shared by every fleet. When the base moves, propagation',
+        'rewrites it, regenerates this file in the same commit, and rebuilds. A pin that lived in the',
+        'recipe would freeze this organisation off the rebuild that carries the next security fix.',
         '',
         'NO BUILD CONTEXT IS REQUIRED. Everything this file installs it carries inline. `podman build`',
         'against an empty directory produces the image. That is what makes "if we vanish, you rebuild',
