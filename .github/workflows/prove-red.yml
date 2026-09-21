@@ -62,3 +62,11 @@ jobs:
 
       - name: Every mutation is caught by the test that owns it
         run: node scripts/prove-red.mjs
+
+      # The differ suite has its own seven, and they live in their own script because they mutate
+      # things this one does not reach: the compiler's label block, the keep-only sweep, and an
+      # example recipe's own YAML. It runs here rather than only in examples.yml, which is
+      # workflow_dispatch-only — a red-proof nobody runs on a pull request is a red-proof that finds
+      # the regression after it has merged.
+      - name: The differ suite can go red too — every YAML difference must reach the image
+        run: node scripts/prove-red-differ.mjs
